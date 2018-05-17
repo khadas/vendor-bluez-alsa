@@ -590,7 +590,14 @@ usage:
 			continue;
 		if (ret != sizeof(event)) {
 			error("Couldn't read event: %s", strerror(ret == -1 ? errno : EBADMSG));
-			goto fail;
+			/*maybe there is something wrong with the data, but try not quit easily
+			 *data sequence may come back right after some recv
+			*/
+			if (0 == ret) {
+				error("Server closed, exit!!");
+				goto fail;
+			} else
+				continue;
 		}
 
 init:

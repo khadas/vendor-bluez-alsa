@@ -394,7 +394,13 @@ void transport_free(struct ba_transport *t) {
 	 * removed anyway. */
 	g_hash_table_steal(t->device->transports, t->dbus_path);
 
-	bluealsa_ctl_event(EVENT_TRANSPORT_REMOVED);
+	/* While hfp diconnecting two EVENT_TRANSPORT_REMOVED will break sequeence in aplay.c
+	 * first one will make aplay.c call bluealsa_get_transports()
+	 * second one will be regarded as transport datas that could cause a chaos
+	 * remove one
+	*/
+	if (t->type != TRANSPORT_TYPE_SCO)
+		bluealsa_ctl_event(EVENT_TRANSPORT_REMOVED);
 
 	free(t->dbus_owner);
 	free(t->dbus_path);
