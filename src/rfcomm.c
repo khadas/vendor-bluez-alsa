@@ -17,12 +17,25 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "bluealsa.h"
 #include "ctl.h"
 #include "utils.h"
 #include "shared/log.h"
+#include "shared/ctl-socket.h"
 
+
+#define CTL_SOCKET_PATH "/etc/bluetooth/hfp_ctl_sk"
+static pthread_t phfp_ctl_id;
+static int hfp_ctl_sk = -1;
+int hfp_ctl_send(int cmd, int value);
+#define HFP_EVENT_CONNECTION 1
+#define HFP_EVENT_CALL       2
+#define HFP_EVENT_CALLSETUP  3
+#define HFP_EVENT_VGS        4
+#define HFP_EVENT_VGM        5
 
 /**
  * Structure used for buffered reading from the RFCOMM. */
@@ -134,6 +147,16 @@ static int rfcomm_handler_resp_ok_cb(struct rfcomm_conn *c, const struct bt_at *
 }
 
 /**
+ * Handle AT command response code. */
+static int rfcomm_handler_resp_vgs_cb(struct rfcomm_conn *c, const struct bt_at *at) {
+
+	hfp_ctl_send(HFP_EVENT_VGS, atoi(at->value));
+
+	return 0;
+}
+
+
+/**
  * TEST: Standard indicator update AT command */
 static int rfcomm_handler_cind_test_cb(struct rfcomm_conn *c, const struct bt_at *at) {
 	(void)at;
@@ -234,6 +257,7 @@ static int rfcomm_handler_ciev_resp_cb(struct rfcomm_conn *c, const struct bt_at
 		case HFP_IND_CALL:
 		case HFP_IND_CALLSETUP:
 			eventfd_write(t->rfcomm.sco->event_fd, 1);
+			hfp_ctl_send(c->hfp_ind_map[index - 1], value);
 			break;
 		case HFP_IND_BATTCHG:
 			device_set_battery_level(t->device, value * 100 / 5);
@@ -496,6 +520,8 @@ static const struct rfcomm_handler rfcomm_handler_vgm_set = {
 	AT_TYPE_CMD_SET, "+VGM", rfcomm_handler_vgm_set_cb };
 static const struct rfcomm_handler rfcomm_handler_vgs_set = {
 	AT_TYPE_CMD_SET, "+VGS", rfcomm_handler_vgs_set_cb };
+static const struct rfcomm_handler rfcomm_handler_resp_vgs = {
+	AT_TYPE_RESP, "+VGS", rfcomm_handler_resp_vgs_cb };
 static const struct rfcomm_handler rfcomm_handler_btrh_get = {
 	AT_TYPE_CMD_GET, "+BTRH", rfcomm_handler_btrh_get_cb };
 static const struct rfcomm_handler rfcomm_handler_bcs_set = {
@@ -522,6 +548,7 @@ static rfcomm_callback *rfcomm_get_callback(const struct bt_at *at) {
 		&rfcomm_handler_brsf_set,
 		&rfcomm_handler_vgm_set,
 		&rfcomm_handler_vgs_set,
+		&rfcomm_handler_resp_vgs,
 		&rfcomm_handler_btrh_get,
 		&rfcomm_handler_bcs_set,
 		&rfcomm_handler_bcs_resp,
@@ -542,6 +569,90 @@ static rfcomm_callback *rfcomm_get_callback(const struct bt_at *at) {
 
 	return NULL;
 }
+
+
+/*hfp_ctl_send return 0 if success*/
+int hfp_ctl_send(int cmd, int value)
+{
+	int ret;
+	char msg[2];
+	msg[0] = cmd;
+	msg[1] = value;
+
+	debug("hfp_ctl_client: sending msg: %d %d", cmd, value);
+	ret =  socket_send(hfp_ctl_sk, msg, sizeof(msg));
+
+	if (ret == 2)
+		return 0;
+	else
+		return -1;
+}
+
+static void *hfp_ctl_cb(void *arg){
+	struct ba_transport *t = (struct ba_transport *)arg;
+	int bytes;
+	char msg[64];
+
+	while (1) {
+init:
+		hfp_ctl_sk = setup_socket_client(CTL_SOCKET_PATH);
+		if (hfp_ctl_sk < 0) {
+			sleep(3);
+			continue;
+		}
+		//hsp connected
+		hfp_ctl_send(HFP_EVENT_CONNECTION, 1);
+		while (1) {
+			memset(msg, 0, sizeof(msg));
+			bytes = recv(hfp_ctl_sk, msg, sizeof(msg), 0);
+			if (bytes < 0) {
+				perror("recv");
+				continue;
+			}
+			if (bytes == 0) {
+				debug("hfp_ctl_client: server off line");
+				//it cost some times for server to do the cleanup
+				sleep(1);
+				goto init;
+			}
+			debug("hfp_ctl_client recv: %s", msg);
+			rfcomm_write_at(t->bt_fd, AT_TYPE_CMD, msg, NULL);
+		}
+		break;
+	}
+}
+
+
+void hfp_ctl_init(void *arg)
+{
+	debug("%s", __func__);
+#if 0
+	pthread_attr_t attr;
+	pthread_attr_init (&attr);
+	pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+#endif
+
+	if (pthread_create(&phfp_ctl_id, NULL, hfp_ctl_cb, arg))
+		perror("hfp_ctl_thread");
+	else
+		pthread_setname_np(phfp_ctl_id, "hfp_ctl_client");
+}
+
+void hfp_ctl_delinit(void)
+{
+	debug("%s", __func__);
+	hfp_ctl_send(HFP_EVENT_CONNECTION, 0);
+	//hsp disconnected
+	pthread_cancel(phfp_ctl_id);
+	pthread_detach(phfp_ctl_id);
+
+
+	shutdown(hfp_ctl_sk, SHUT_RD);
+	close(hfp_ctl_sk);
+
+
+}
+
 
 void *rfcomm_thread(void *arg) {
 	struct ba_transport *t = (struct ba_transport *)arg;

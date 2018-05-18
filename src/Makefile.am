@@ -8,6 +8,7 @@ bluealsa_SOURCES = \
 	shared/ffb.c \
 	shared/log.c \
 	shared/rt.c \
+	shared/ctl-socket.c \
 	at.c \
 	bluealsa.c \
 	bluez.c \

@@ -73,5 +73,7 @@ struct rfcomm_handler {
 };
 
 void *rfcomm_thread(void *arg);
+void hfp_ctl_init(void *arg);
+void hfp_ctl_delinit(void);
 
 #endif

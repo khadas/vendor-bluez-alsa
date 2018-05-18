@@ -34,6 +34,7 @@
 #include "utils.h"
 #include "shared/log.h"
 
+#define HFP_CTL_CLIENT
 
 static int io_thread_create(struct ba_transport *t) {
 
@@ -98,6 +99,11 @@ static int io_thread_create(struct ba_transport *t) {
 		t->thread = config.main_thread;
 		return -1;
 	}
+
+#ifdef HFP_CTL_CLIENT
+	if (t->type == TRANSPORT_TYPE_RFCOMM)
+		hfp_ctl_init(t);
+#endif
 
 	pthread_setname_np(t->thread, "baio");
 	debug("Created new IO thread: %s",
@@ -353,7 +359,7 @@ void transport_free(struct ba_transport *t) {
 	 * race condition (closed and reused file descriptor). */
 	if (!pthread_equal(t->thread, config.main_thread)) {
 		pthread_cancel(t->thread);
-		pthread_join(t->thread, NULL);
+		pthread_detach(t->thread);
 	}
 
 	/* if possible, try to release resources gracefully */
@@ -377,6 +383,9 @@ void transport_free(struct ba_transport *t) {
 		memset(&t->device->battery, 0, sizeof(t->device->battery));
 		memset(&t->device->xapl, 0, sizeof(t->device->xapl));
 		transport_free(t->rfcomm.sco);
+#ifdef HFP_CTL_CLIENT
+		hfp_ctl_delinit();
+#endif
 		break;
 	case TRANSPORT_TYPE_SCO:
 		transport_release_pcm(&t->sco.spk_pcm);

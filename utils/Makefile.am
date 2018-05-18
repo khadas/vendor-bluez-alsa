@@ -31,3 +31,17 @@ hcitop_LDADD = \
 	@LIBBSD_LIBS@ \
 	@NCURSES_LIBS@
 endif
+
+bin_PROGRAMS += a2dp_ctl
+a2dp_ctl_SOURCES = a2dp_ctl.c
+a2dp_ctl_CFLAGS = \
+	@GIO2_CFLAGS@
+a2dp_ctl_LDADD = \
+	@GIO2_LIBS@
+
+bin_PROGRAMS += hfp_ctl
+hfp_ctl_SOURCES = hfp_ctl.c \
+	../src/shared/log.c \
+	../src/shared/ctl-socket.c
+hfp_ctl_CFLAGS = -lpthread \
+	-I$(top_srcdir)/src
