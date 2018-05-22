@@ -537,9 +537,9 @@ static int bluez_endpoint_set_configuration(GDBusMethodInvocation *inv, void *us
 	t->a2dp.ch2_volume = volume;
 	t->a2dp.delay = delay;
 
-	debug("%s configured for device %s",
+	info("%s configured for device %s",
 			bluetooth_profile_to_string(profile, codec), batostr_(&d->addr));
-	debug("Configuration: channels: %u, sampling: %u",
+	info("Configuration: channels: %u, sampling: %u",
 			transport_get_channels(t), transport_get_sampling(t));
 
 	transport_set_state_from_string(t, state);
@@ -606,7 +606,7 @@ static void bluez_endpoint_method_call(GDBusConnection *conn, const gchar *sende
 
 	struct ba_dbus_object *obj;
 
-	debug("Endpoint method call: %s.%s()", interface, method);
+	info("Endpoint method call: %s.%s()", interface, method);
 
 	gpointer hash = GINT_TO_POINTER(g_str_hash(path));
 	obj = g_hash_table_lookup(config.dbus_objects, hash);
@@ -677,7 +677,7 @@ static int bluez_register_a2dp_endpoint(
 		.codec = codec,
 	};
 
-	debug("Registering endpoint: %s", path);
+	info("Registering endpoint: %s", path);
 	if ((dbus_object.id = g_dbus_connection_register_object(conn, path,
 					(GDBusInterfaceInfo *)&bluez_iface_endpoint, &endpoint_vtable,
 					NULL, endpoint_free, &err)) == 0)
@@ -797,7 +797,7 @@ static void bluez_profile_new_connection(GDBusMethodInvocation *inv, void *userd
 	t->bt_fd = fd;
 	t->release = transport_release_bt_rfcomm;
 
-	debug("%s configured for device %s",
+	info("%s configured for device %s",
 			bluetooth_profile_to_string(profile, -1), batostr_(&d->addr));
 
 	transport_set_state(t, TRANSPORT_ACTIVE);
@@ -911,7 +911,7 @@ static int bluez_register_profile(
 		.codec = 0,
 	};
 
-	debug("Registering profile: %s", path);
+	info("Registering profile: %s", path);
 	if ((dbus_object.id = g_dbus_connection_register_object(conn, path,
 					(GDBusInterfaceInfo *)&bluez_iface_profile, &profile_vtable,
 					NULL, profile_free, &err)) == 0)

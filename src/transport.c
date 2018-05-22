@@ -276,6 +276,8 @@ struct ba_transport *transport_new_a2dp(
 
 	struct ba_transport *t;
 
+	system("hciconfig hci0 noscan");
+
 	if ((t = transport_new(device, TRANSPORT_TYPE_A2DP,
 					dbus_owner, dbus_path, profile, codec)) == NULL)
 		return NULL;
@@ -350,7 +352,7 @@ void transport_free(struct ba_transport *t) {
 		return;
 
 	t->state = TRANSPORT_LIMBO;
-	debug("Freeing transport: %s",
+	info("Freeing transport: %s",
 			bluetooth_profile_to_string(t->profile, t->codec));
 
 	/* If the transport is active, prior to releasing resources, we have to
@@ -378,6 +380,7 @@ void transport_free(struct ba_transport *t) {
 		pthread_cond_destroy(&t->a2dp.pcm.drained);
 		pthread_mutex_destroy(&t->a2dp.pcm.drained_mn);
 		free(t->a2dp.cconfig);
+		system("hciconfig hci0 piscan");
 		break;
 	case TRANSPORT_TYPE_RFCOMM:
 		memset(&t->device->battery, 0, sizeof(t->device->battery));

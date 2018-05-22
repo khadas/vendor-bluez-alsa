@@ -224,6 +224,7 @@ accept:
 					case HFP_IND_CALL_ACTIVE :
 						INFO("Call active!!!\n");
 						break;
+				}
 				break;
 
 			case HFP_EVENT_CALLSETUP:
@@ -239,6 +240,7 @@ accept:
 						break;
 				}
 				break;
+
 			case HFP_EVENT_VGS:
 				INFO("VGS EVENT!!!\n");
 				sVol = value;
@@ -247,7 +249,6 @@ accept:
 				INFO("VGM EVENT!!!\n");
 				mVol = value;
 				break;
-			}
 		}
 	}
 	INFO("exit\n");

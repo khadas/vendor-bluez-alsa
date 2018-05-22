@@ -278,11 +278,11 @@ int main(int argc, char **argv) {
 	sigaction(SIGINT, &sigact, NULL);
 
 	/* main dispatching loop */
-	debug("Starting main dispatching loop");
+	info("Starting main dispatching loop");
 	loop = g_main_loop_new(NULL, FALSE);
 	g_main_loop_run(loop);
 
-	debug("Exiting main loop");
+	info("Exiting main loop");
 
 	/* From all of the cleanup routines, these ones cannot be omitted. We have
 	 * to unlink named sockets, otherwise service will not start any more. */

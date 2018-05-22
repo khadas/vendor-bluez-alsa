@@ -69,7 +69,7 @@ static int rfcomm_read_at(int fd, struct at_reader *reader) {
 		ssize_t len;
 
 retry:
-		if ((len = read(fd, buffer, sizeof(reader->buffer))) == -1) {
+		if ((len = read(fd, buffer, sizeof(reader->buffer) -1)) == -1) {
 			if (errno == EINTR)
 				goto retry;
 			return -1;
@@ -606,13 +606,14 @@ init:
 			memset(msg, 0, sizeof(msg));
 			bytes = recv(hfp_ctl_sk, msg, sizeof(msg), 0);
 			if (bytes < 0) {
-				perror("recv");
+				perror("hfp_ctl_cb");
 				continue;
 			}
 			if (bytes == 0) {
 				debug("hfp_ctl_client: server off line");
 				//it cost some times for server to do the cleanup
 				sleep(1);
+				close(hfp_ctl_sk);
 				goto init;
 			}
 			debug("hfp_ctl_client recv: %s", msg);

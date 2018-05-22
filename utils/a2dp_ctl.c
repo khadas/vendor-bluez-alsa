@@ -308,11 +308,11 @@ static void signal_interfaces_added(GDBusConnection *conn,
 		if (strcmp(interface_name, TRANSPORT_INTERFACE) == 0) {
 			memset(TRANSPORT_OBJECT, 0, sizeof(TRANSPORT_OBJECT));
 			INFO("Media_Transport registerd: %s\n", object);
-			memcpy(TRANSPORT_OBJECT, object, strlen(object));
+			strncpy(TRANSPORT_OBJECT, object, sizeof(TRANSPORT_OBJECT) -1);
 		} else if (strcmp(interface_name, PLAYER_INTERFACE) == 0) {
 			memset(PLAYER_OBJECT, 0, sizeof(PLAYER_OBJECT));
 			INFO("Media_Player registerd: %s\n", object);
-			memcpy(PLAYER_OBJECT, object, strlen(object));
+			strncpy(PLAYER_OBJECT, object, sizeof(PLAYER_OBJECT) - 1);
 		} else if (strcmp(interface_name, CONTROL_INTERFACE) == 0) {
 			INFO("Media_Control registerd: %s\n", object);
 		}
@@ -462,11 +462,11 @@ static int call_objManager_method(void)
 				//get object path
 			} else if (strcmp(interface_name, TRANSPORT_INTERFACE) == 0) {
 				memset(TRANSPORT_OBJECT, 0, sizeof(TRANSPORT_OBJECT));
-				memcpy(TRANSPORT_OBJECT, object, strlen(object));
+				strncpy(TRANSPORT_OBJECT, object, sizeof(TRANSPORT_OBJECT) -1);
 				INFO("Media_Transport registerd: %s\n", object);
 			} else if (strcmp(interface_name, PLAYER_INTERFACE) == 0) {
 				memset(PLAYER_OBJECT, 0, sizeof(PLAYER_OBJECT));
-				memcpy(PLAYER_OBJECT, object, strlen(object));
+				strncpy(PLAYER_OBJECT, object, sizeof(PLAYER_OBJECT) - 1);
 				INFO("Media_Player registerd: %s\n", object);
 			}
 			g_free(interface_name);
@@ -512,14 +512,16 @@ static void *dbus_thread(void *user_data)
 {
 	main_loop = g_main_loop_new(NULL, FALSE);
 	g_main_loop_run(main_loop);
+
+	return NULL;
 }
 
 
-void main()
+int main(int argc, void *argv)
 {
 	int i;
 	if (player_init())
-		return;
+		return 0;
 
 	while (A2dpConnected == FALSE) {
 		sleep(1);
@@ -551,5 +553,7 @@ void main()
 	sleep(2);
 
 	player_delinit();
+
+	return 0;
 
 }

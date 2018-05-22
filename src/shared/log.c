@@ -43,29 +43,35 @@ void log_open(const char *ident, bool syslog, bool time) {
 static void vlog(int priority, const char *format, va_list ap) {
 
 	int oldstate;
+	FILE *stream;
 
 	/* Threads cancellation is used extensively in the BlueALSA code. In order
 	 * to prevent termination within the logging function (which might provide
 	 * important information about what has happened), the thread cancellation
 	 * has to be temporally disabled. */
+	if (priority == LOG_INFO)
+		stream = stdout;
+	else
+		stream = stderr;
+
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
 
 	if (_syslog)
 		vsyslog(priority, format, ap);
 
-	flockfile(stderr);
+	flockfile(stream);
 
 	if (_ident != NULL)
-		fprintf(stderr, "%s: ", _ident);
+		fprintf(stream, "%s: ", _ident);
 	if (_time) {
 		struct timespec ts;
 		gettimestamp(&ts);
-		fprintf(stderr, "%lu.%.9lu: ", (long int)ts.tv_sec, ts.tv_nsec);
+		fprintf(stream, "%lu.%.9lu: ", (long int)ts.tv_sec, ts.tv_nsec);
 	}
-	vfprintf(stderr, format, ap);
-	fputs("\n", stderr);
+	vfprintf(stream, format, ap);
+	fputs("\n", stream);
 
-	funlockfile(stderr);
+	funlockfile(stream);
 
 	pthread_setcancelstate(oldstate, NULL);
 

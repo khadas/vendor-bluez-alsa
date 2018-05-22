@@ -16,7 +16,7 @@ int setup_socket_server(tAPP_SOCKET *app_socket)
 		return -1;
 	}
 	app_socket->server_address.sun_family = AF_UNIX;
-	strcpy (app_socket->server_address.sun_path, app_socket->sock_path);
+	strncpy (app_socket->server_address.sun_path, app_socket->sock_path, sizeof(app_socket->server_address.sun_path));
 	app_socket->server_len = sizeof (app_socket->server_address);
 	app_socket->client_len = sizeof (app_socket->client_address);
 	if ((bind (app_socket->server_sockfd, (struct sockaddr *)&app_socket->server_address, app_socket->server_len)) < 0) {
@@ -64,11 +64,12 @@ int setup_socket_client(char *socket_path)
 	}
 
 	address.sun_family = AF_UNIX;
-	strcpy (address.sun_path, socket_path);
+	strncpy (address.sun_path, socket_path, sizeof(address.sun_path));
 	len = sizeof (address);
 
 	if (connect (sockfd, (struct sockaddr *)&address, len) == -1) {
 		debug("connect server: %s", strerror(errno));
+		close(sockfd);
 		return -1;
 	}
 
@@ -93,6 +94,8 @@ int socket_send(int sockfd, char *msg, int len)
 	if ((bytes = send(sockfd, msg, len, 0)) < 0) {
 		error("send: %s", strerror(errno));
 	}
+	/*add delay, in case of meshing up with next msg*/
+	usleep(1000);
 	return bytes;
 }
 
