@@ -41,7 +41,11 @@ a2dp_ctl_LDADD = \
 
 bin_PROGRAMS += hfp_ctl
 hfp_ctl_SOURCES = hfp_ctl.c \
+	sco_handler.c \
 	../src/shared/log.c \
 	../src/shared/ctl-socket.c
 hfp_ctl_CFLAGS = -lpthread \
-	-I$(top_srcdir)/src
+	-I$(top_srcdir)/src \
+	@ALSA_CFLAGS@
+hfp_ctl_LDADD = \
+	@ALSA_LIBS@

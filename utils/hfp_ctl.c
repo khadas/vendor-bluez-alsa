@@ -6,6 +6,7 @@
 #include <sys/un.h>
 #include "shared/ctl-socket.h"
 #include "hfp_ctl.h"
+#include "sco_handler.h"
 
 
 #define INFO(fmt, args...) \
@@ -220,9 +221,11 @@ accept:
 				switch (value) {
 					case HFP_IND_CALL_NONE:
 						INFO("Call stopped!!!\n");
+						set_sco_enable(0);
 						break;
 					case HFP_IND_CALL_ACTIVE :
 						INFO("Call active!!!\n");
+						set_sco_enable(1);
 						break;
 				}
 				break;
@@ -255,6 +258,14 @@ accept:
 	return NULL;
 }
 
+static void signal_handler(int sig)
+{
+	INFO("INT/TERM signal detected\n");
+	hfp_ctl_delinit();
+	signal(sig, SIG_DFL);
+	exit(0);
+}
+
 
 int main(int argc, char **argv)
 {
@@ -262,7 +273,9 @@ int main(int argc, char **argv)
 	if (hfp_ctl_init())
 		return -1;
 
-
+	signal(SIGINT, signal_handler);
+	signal(SIGTERM, signal_handler);
+#if 0
 	while (!hfp_connected)
 		sleep(1);
 
@@ -273,9 +286,9 @@ int main(int argc, char **argv)
 	VGM_down();
 	sleep(5);
 	reject_call();
+#endif
 
 	while (1)
 		sleep(1);
 
-	hfp_ctl_delinit();
 }
