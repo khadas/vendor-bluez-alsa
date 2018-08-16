@@ -30,6 +30,8 @@
 #define CTL_SOCKET_PATH "/etc/bluetooth/hfp_ctl_sk"
 static pthread_t phfp_ctl_id;
 static int hfp_ctl_sk = -1;
+static int callStatus = 0;
+static int callSetupStatus = 0;
 int hfp_ctl_send(int cmd, int value);
 #define HFP_EVENT_CONNECTION 1
 #define HFP_EVENT_CALL       2
@@ -217,6 +219,13 @@ static int rfcomm_handler_cind_resp_get_cb(struct rfcomm_conn *c, const struct b
 		t->rfcomm.hfp_inds[c->hfp_ind_map[i]] = atoi(tmp);
 		if (c->hfp_ind_map[i] == HFP_IND_BATTCHG)
 			device_set_battery_level(t->device, atoi(tmp) * 100 / 5);
+
+		if (c->hfp_ind_map[i] == HFP_IND_CALL)
+			callStatus = atoi(tmp);
+
+		if (c->hfp_ind_map[i] == HFP_IND_CALLSETUP)
+			callSetupStatus = atoi(tmp);
+
 		if ((tmp = strchr(tmp, ',')) == NULL)
 			break;
 		tmp += 1;
@@ -255,9 +264,14 @@ static int rfcomm_handler_ciev_resp_cb(struct rfcomm_conn *c, const struct bt_at
 		t->rfcomm.hfp_inds[c->hfp_ind_map[index - 1]] = value;
 		switch (c->hfp_ind_map[index - 1]) {
 		case HFP_IND_CALL:
+			eventfd_write(t->rfcomm.sco->event_fd, 1);
+			hfp_ctl_send(HFP_EVENT_CALL, value);
+			callStatus = value;
+			break;
 		case HFP_IND_CALLSETUP:
 			eventfd_write(t->rfcomm.sco->event_fd, 1);
-			hfp_ctl_send(c->hfp_ind_map[index - 1], value);
+			hfp_ctl_send(HFP_EVENT_CALLSETUP, value);
+			callSetupStatus = value;
 			break;
 		case HFP_IND_BATTCHG:
 			device_set_battery_level(t->device, value * 100 / 5);
@@ -751,6 +765,16 @@ void *rfcomm_thread(void *arg) {
 				case HFP_SLC_CMER_SET_OK:
 					rfcomm_set_hfp_state(&conn, HFP_SLC_CONNECTED);
 				case HFP_SLC_CONNECTED:
+					/*only fully connected can we report call status & callsetup*/
+					if (callStatus)
+						hfp_ctl_send(HFP_EVENT_CALL, callStatus);
+
+					if (callSetupStatus)
+						hfp_ctl_send(HFP_EVENT_CALLSETUP, callSetupStatus);
+
+					callStatus = 0;
+					callSetupStatus = 0;
+
 					if (t->rfcomm.hfp_features & HFP_AG_FEAT_CODEC)
 						break;
 				case HFP_CC_BCS_SET:

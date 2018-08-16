@@ -208,6 +208,7 @@ accept:
 				switch (value) {
 					case HFP_IND_DEVICE_DISCONNECTED:
 						INFO("HFP disconnected!!!\n");
+						set_sco_enable(0);
 						hfp_connected = 0;
 						break;
 					case HFP_IND_DEVICE_CONNECTED:
@@ -240,6 +241,9 @@ accept:
 						break;
 					case HFP_IND_CALLSETUP_OUT :
 						INFO("An outgoing Callsetup!!!\n");
+						break;
+					case HFP_IND_CALLSETUP_OUT_ALERT :
+						INFO("Remote device being altered!!!\n");
 						break;
 				}
 				break;
