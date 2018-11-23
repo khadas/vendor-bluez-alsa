@@ -1,5 +1,4 @@
-/*
- * BlueALSA - rfcomm.c
+/* * BlueALSA - rfcomm.c
  * Copyright (c) 2016-2017 Arkadiusz Bokowy
  *               2017 Juha Kuikka
  *
@@ -19,6 +18,7 @@
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <semaphore.h>
 
 #include "bluealsa.h"
 #include "ctl.h"
@@ -29,15 +29,20 @@
 
 #define CTL_SOCKET_PATH "/etc/bluetooth/hfp_ctl_sk"
 static pthread_t phfp_ctl_id;
-static int hfp_ctl_sk = -1;
+static tAPP_SOCKET *hfp_ctl_sk = NULL;
 static int callStatus = 0;
 static int callSetupStatus = 0;
-int hfp_ctl_send(int cmd, int value);
+void hfp_ctl_send(int cmd, int value);
 #define HFP_EVENT_CONNECTION 1
 #define HFP_EVENT_CALL       2
 #define HFP_EVENT_CALLSETUP  3
 #define HFP_EVENT_VGS        4
 #define HFP_EVENT_VGM        5
+struct hfp_ctl_data {
+	int fd;
+	struct ba_transport *t;
+};
+static sem_t sem;
 
 /**
  * Structure used for buffered reading from the RFCOMM. */
@@ -586,61 +591,121 @@ static rfcomm_callback *rfcomm_get_callback(const struct bt_at *at) {
 
 
 /*hfp_ctl_send return 0 if success*/
-int hfp_ctl_send(int cmd, int value)
+void hfp_ctl_send(int cmd, int value)
 {
-	int ret;
 	char msg[2];
 	msg[0] = cmd;
 	msg[1] = value;
 
-	debug("hfp_ctl_client: sending msg: %d %d", cmd, value);
-	ret =  socket_send(hfp_ctl_sk, msg, sizeof(msg));
+	debug("hfp_ctl_server: sending msg: %d %d", cmd, value);
+	send_all_client(hfp_ctl_sk, msg, sizeof(msg));
 
-	if (ret == 2)
-		return 0;
-	else
-		return -1;
+}
+
+static void *hfp_ctl_client_handler(void *arg)
+{
+	struct hfp_ctl_data *phcd = (struct hfp_ctl_data *)arg;
+	struct ba_transport *t = phcd->t;
+	int fd = phcd->fd;
+	char msg[64];
+	char hello[2] = {HFP_EVENT_CONNECTION, 1};
+	int bytes;
+
+	/*once hcd data copied, increase the sem*/
+	sem_post(&sem);
+
+	send(fd, hello, 2, 0);
+
+	while (1) {
+		memset(msg, 0, sizeof(msg));
+		bytes = recv(fd, msg, sizeof(msg), 0);
+		if (bytes < 0) {
+			perror("hfp_ctl_client_handler");
+			continue;
+		}
+		if (bytes == 0) {
+			debug("hfp_ctl_server: client fd%d off line", fd);
+			break;
+		}
+		debug("hfp_ctl_server recv: %s from fd%d", msg, fd);
+		rfcomm_write_at(t->bt_fd, AT_TYPE_CMD, msg, NULL);
+	}
+
+	//release resource and exit thread
+	close(fd);
+	remove_one_client(hfp_ctl_sk, fd);
+	pthread_detach(pthread_self());
+	return NULL;
 }
 
 static void *hfp_ctl_cb(void *arg){
-	struct ba_transport *t = (struct ba_transport *)arg;
-	int bytes;
-	char msg[64];
+	struct hfp_ctl_data hcd;
+	pthread_t pid = 0;
+	int  fd;
+
+
+	sem_wait(&sem);
+
+	hfp_ctl_sk = setup_socket_server(CTL_SOCKET_PATH);
+	if (hfp_ctl_sk == 0) {
+		error("%s", __func__);
+		sem_post(&sem);
+		return NULL;
+	}
 
 	while (1) {
+
 init:
-		hfp_ctl_sk = setup_socket_client(CTL_SOCKET_PATH);
-		if (hfp_ctl_sk < 0) {
-			sleep(3);
-			continue;
+		fd = accept_client(hfp_ctl_sk);
+		/*some errors happen, try again*/
+		if (fd == -1) {
+			/*if accept fail and err invalid arg, jump out and stop the thread*/
+			if (errno == EINVAL)
+				break;
+
+			goto init;
 		}
-		//hsp connected
-		hfp_ctl_send(HFP_EVENT_CONNECTION, 1);
-		while (1) {
-			memset(msg, 0, sizeof(msg));
-			bytes = recv(hfp_ctl_sk, msg, sizeof(msg), 0);
-			if (bytes < 0) {
-				perror("hfp_ctl_cb");
-				continue;
-			}
-			if (bytes == 0) {
-				debug("hfp_ctl_client: server off line");
-				//it cost some times for server to do the cleanup
-				sleep(1);
-				close(hfp_ctl_sk);
-				goto init;
-			}
-			debug("hfp_ctl_client recv: %s", msg);
-			rfcomm_write_at(t->bt_fd, AT_TYPE_CMD, msg, NULL);
-		}
-		break;
+
+		debug("%s: new connected client: fd%d", __func__, fd);
+
+		hcd.fd = fd;
+		hcd.t  = (struct ba_transport *)arg;
+
+		if (pthread_create(&pid, NULL, hfp_ctl_client_handler, (void *)&hcd)) {
+			sem_post(&sem);
+			perror("hfp_ctl_cb thread:");
+		} else
+			pthread_setname_np(pid, "hfp_ctl_sub");
+
+		/*incase hcd would be recover!!*/
+		sem_wait(&sem);
+
+		pid = 0;
+		fd = 0;
 	}
+	pthread_detach(pthread_self());
+	//sleep(2);
+	teardown_socket_server(hfp_ctl_sk);
+	sem_post(&sem);
+
+	return NULL;
 }
 
 
 void hfp_ctl_init(void *arg)
 {
+	static int firstrun = 1;
 	debug("%s", __func__);
+
+	if (firstrun) {
+		/*semaphore, share with threads, initial value 1*/
+		if (sem_init(&sem, 0, 1)) {
+			error("%s", strerror(errno));
+			return;
+		}
+		firstrun = 0;
+	}
+
 #if 0
 	pthread_attr_t attr;
 	pthread_attr_init (&attr);
@@ -650,22 +715,15 @@ void hfp_ctl_init(void *arg)
 	if (pthread_create(&phfp_ctl_id, NULL, hfp_ctl_cb, arg))
 		perror("hfp_ctl_thread");
 	else
-		pthread_setname_np(phfp_ctl_id, "hfp_ctl_client");
+		pthread_setname_np(phfp_ctl_id, "hfp_ctl_server");
 }
 
 void hfp_ctl_delinit(void)
 {
 	debug("%s", __func__);
 	hfp_ctl_send(HFP_EVENT_CONNECTION, 0);
-	//hsp disconnected
-	pthread_cancel(phfp_ctl_id);
-	pthread_detach(phfp_ctl_id);
-
-
-	shutdown(hfp_ctl_sk, SHUT_RD);
-	close(hfp_ctl_sk);
-
-
+	shutdown(hfp_ctl_sk->server_sockfd, SHUT_RD);
+	shutdown_all_client(hfp_ctl_sk);
 }
 
 

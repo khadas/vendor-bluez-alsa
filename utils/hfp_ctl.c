@@ -13,7 +13,7 @@
 	printf("[HFP_CTL][%s] " fmt, __func__, ##args)
 
 
-static tAPP_SOCKET hfp_ctl_sk;
+static int hfp_ctl_sk = 0;
 static unsigned int sVol = 10;
 static unsigned int mVol = 10;
 static int hfp_connected = 0;
@@ -45,17 +45,9 @@ static void *hfp_ctl_monitor(void *arg);
 
 int hfp_ctl_init(void)
 {
-	strcpy(hfp_ctl_sk.sock_path, CTL_SOCKET_PATH);
-	if (setup_socket_server(&hfp_ctl_sk)) {
-		INFO("setup socket server fail\n");
-		return -1;
-	}
-
-	//wait for socket ready
-	usleep(1000);
 	if (pthread_create(&phfp_ctl_id, NULL, hfp_ctl_monitor, NULL)) {
-		perror("hfp_ctl_server");
-		teardown_socket_server(&hfp_ctl_sk);
+		perror("hfp_ctl_client");
+		teardown_socket_client(hfp_ctl_sk);
 		return -1;
 	}
 	pthread_setname_np(phfp_ctl_id, "hfp_ctl_monitor");
@@ -74,7 +66,7 @@ void hfp_ctl_delinit(void)
 	pthread_detach(phfp_ctl_id);
 
 	hfp_connected = 0;
-	teardown_socket_server(&hfp_ctl_sk);
+	teardown_socket_client(hfp_ctl_sk);
 }
 
 int answer_call(void)
@@ -82,7 +74,7 @@ int answer_call(void)
 	unsigned int byte, ret = 1;
 	char msg[] = "A";
 	INFO("\n");
-	byte = socket_send(hfp_ctl_sk.client_sockfd, msg, strlen(msg));
+	byte = send(hfp_ctl_sk, msg, strlen(msg), 0);
 
 	if (byte == strlen(msg))
 		ret = 0;
@@ -95,7 +87,7 @@ int reject_call(void)
 	unsigned int byte, ret = 1;
 	char msg[] = "+CHUP";
 	INFO("\n");
-	byte = socket_send(hfp_ctl_sk.client_sockfd, msg, strlen(msg));
+	byte = send(hfp_ctl_sk, msg, strlen(msg), 0);
 	if (byte == strlen(msg))
 		ret = 0;
 
@@ -139,7 +131,7 @@ int set_VGS(int value)
 
 	sprintf(msg, "+VGS=%d", value);
 	INFO("\n");
-	byte = socket_send(hfp_ctl_sk.client_sockfd, msg, strlen(msg));
+	byte = send(hfp_ctl_sk, msg, strlen(msg), 0);
 	if (byte == strlen(msg))
 		ret = 0;
 
@@ -157,7 +149,7 @@ int set_VGM(int value)
 
 	sprintf(msg, "+VGM=%d", value);
 	INFO("\n");
-	byte = socket_send(hfp_ctl_sk.client_sockfd, msg, strlen(msg));
+	byte = send(hfp_ctl_sk, msg, strlen(msg), 0);
 	if (byte == strlen(msg))
 		ret = 0;
 
@@ -169,25 +161,26 @@ static void *hfp_ctl_monitor(void *arg)
 	int byte, value = -1, event =-1, i;
 	char msg[64];
 
-
-accept:
-
-	if (accpet_client(&hfp_ctl_sk) < 0) {
-		INFO("accept client fail\n");
-		return NULL;
+init:
+	hfp_ctl_sk = setup_socket_client(CTL_SOCKET_PATH);
+	if (hfp_ctl_sk < 0) {
+		sleep(3);
+		goto init;
 	}
+
 
 	INFO("recieving....\n");
 	while (1) {
 		memset(msg, 0, sizeof(msg));
-		byte = recv(hfp_ctl_sk.client_sockfd, msg, sizeof(msg), 0);
+		byte = recv(hfp_ctl_sk, msg, sizeof(msg), 0);
 		if (byte < 0) {
 			perror("recv");
 			continue;
 		}
 		if (byte == 0) {
-			INFO("client off line\n");
-			goto accept;
+			INFO("server off line\n");
+			sleep(3);
+			goto init;
 		}
 
 		if (byte == 2) {
@@ -279,10 +272,10 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
-#if 0
 	while (!hfp_connected)
 		sleep(1);
 
+#if 0
 	answer_call();
 	VGS_up();
 	VGM_up();
@@ -291,7 +284,6 @@ int main(int argc, char **argv)
 	sleep(5);
 	reject_call();
 #endif
-
 	while (1)
 		sleep(1);
 

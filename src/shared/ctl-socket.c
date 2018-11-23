@@ -8,12 +8,19 @@
 
 /********************SERVER API***************************/
 
-int setup_socket_server(tAPP_SOCKET *app_socket)
+tAPP_SOCKET * setup_socket_server(const char *path)
 {
-	unlink (app_socket->sock_path);
+	tAPP_SOCKET *app_socket = calloc(1, sizeof(tAPP_SOCKET));
+
+	if (!app_socket)
+		return NULL;
+
+	strcpy(app_socket->sock_path, path);
+
+	unlink(path);
 	if ((app_socket->server_sockfd = socket (AF_UNIX, SOCK_STREAM, 0)) < 0) {
 		error("fail to create socket: %s", strerror(errno));
-		return -1;
+		return NULL;
 	}
 	app_socket->server_address.sun_family = AF_UNIX;
 	strncpy (app_socket->server_address.sun_path, app_socket->sock_path, sizeof(app_socket->server_address.sun_path));
@@ -21,36 +28,97 @@ int setup_socket_server(tAPP_SOCKET *app_socket)
 	app_socket->client_len = sizeof (app_socket->client_address);
 	if ((bind (app_socket->server_sockfd, (struct sockaddr *)&app_socket->server_address, app_socket->server_len)) < 0) {
 		error("bind: %s", strerror(errno));
-		return -1;
+		return NULL;
 
 	}
 	if (listen (app_socket->server_sockfd, 10) < 0) {
 		error("listen: %s", strerror(errno));
-		return -1;
+		return NULL;
 	}
 	debug("Server is ready for client connect...\n");
 
-	return 0;
+	return app_socket;
 }
 
-int accpet_client(tAPP_SOCKET *app_socket)
+int accept_client(tAPP_SOCKET *app_socket)
 {
-	app_socket->client_sockfd = accept (app_socket->server_sockfd, (struct sockaddr *)&app_socket->server_address, (socklen_t *)&app_socket->client_len);
-	if (app_socket->client_sockfd == -1) {
+	int fd;
+	fd = accept (app_socket->server_sockfd, (struct sockaddr *)&app_socket->server_address, (socklen_t *)&app_socket->client_len);
+
+
+	if (fd == -1)
 		error("accept: %s", strerror(errno));
-		return -1;
+	else {
+		app_socket->client_sockfd[app_socket->client_seq] = fd;
+		app_socket->client_seq++;
+
+		app_socket->client_seq %= CLIENT_FD_MAX;
 	}
-	return 0;
+
+	return fd;
 }
 
 void teardown_socket_server(tAPP_SOCKET *app_socket)
 {
 	unlink (app_socket->sock_path);
-	app_socket->server_sockfd = 0;
-	app_socket->client_sockfd = 0;
+	free(app_socket);
 }
 
 
+void send_all_client(tAPP_SOCKET *app_socket, char *msg, int len)
+{
+	int i;
+	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
+		if (app_socket->client_sockfd[i]) {
+			debug("%s client fd%d", __func__, app_socket->client_sockfd[i]);
+			send(app_socket->client_sockfd[i], msg, len, 0);
+		}
+	}
+}
+
+void shutdown_all_client(tAPP_SOCKET *app_socket)
+{
+	int i;
+	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
+		if (app_socket->client_sockfd[i]) {
+			debug("%s: shutingdown client fd%d", __func__, app_socket->client_sockfd[i]);
+			shutdown(app_socket->client_sockfd[i], SHUT_RDWR);
+		}
+	}
+}
+
+void close_all_clent(tAPP_SOCKET *app_socket)
+{
+	int i;
+	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
+		if (app_socket->client_sockfd[i]) {
+			debug("%s: closing client fd%d", __func__, app_socket->client_sockfd[i]);
+			close(app_socket->client_sockfd[i]);
+		}
+	}
+}
+
+void remove_one_client(tAPP_SOCKET *app_socket, int fd)
+{
+	int i;
+	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
+		if (app_socket->client_sockfd[i] == fd) {
+			debug("%s: remove client fd%d", __func__, app_socket->client_sockfd[i]);
+			app_socket->client_sockfd[i] = 0;
+		}
+	}
+}
+
+void remove_all_client(tAPP_SOCKET *app_socket)
+{
+	int i;
+	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
+		if (app_socket->client_sockfd[i]) {
+			debug("%s: remove client fd%d", __func__, app_socket->client_sockfd[i]);
+			app_socket->client_sockfd[i] = 0;
+		}
+	}
+}
 
 /********************CLIENT API***************************/
 int setup_socket_client(char *socket_path)
@@ -59,8 +127,8 @@ int setup_socket_client(char *socket_path)
 	int sockfd,  len;
 
 	if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-			error("%s", strerror(errno));
-			return -1;
+		error("%s", strerror(errno));
+		return -1;
 	}
 
 	address.sun_family = AF_UNIX;
@@ -68,7 +136,9 @@ int setup_socket_client(char *socket_path)
 	len = sizeof (address);
 
 	if (connect (sockfd, (struct sockaddr *)&address, len) == -1) {
-		debug("connect server: %s", strerror(errno));
+		/*if socket is not avialable or not ready, don't report error*/
+		if (errno != 111 && errno != 2)
+			debug("connect server: %s", strerror(errno));
 		close(sockfd);
 		return -1;
 	}
@@ -80,40 +150,6 @@ int setup_socket_client(char *socket_path)
 void teardown_socket_client(int sockfd)
 {
 	close(sockfd);
-}
-
-/********************COMMON API***************************/
-int socket_send(int sockfd, char *msg, int len)
-{
-	int bytes;
-
-	if (sockfd < 0) {
-		error("%s", strerror(errno));
-		return -1;
-	}
-	if ((bytes = send(sockfd, msg, len, 0)) < 0) {
-		error("send: %s", strerror(errno));
-	}
-	/*add delay, in case of meshing up with next msg*/
-	usleep(1000);
-	return bytes;
-}
-
-int socket_recieve(int sockfd, char *msg, int len)
-{
-	int bytes;
-
-	if (sockfd < 0) {
-		error("%s", strerror(errno));
-		return -1;
-	}
-
-	if ((bytes = recv(sockfd, msg, len, 0)) < 0)
-	{
-		error("recv: %s", strerror(errno));
-	}
-	return bytes;
-
 }
 
 
