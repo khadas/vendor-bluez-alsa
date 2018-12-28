@@ -8,6 +8,18 @@
 #include <pthread.h>
 #include "a2dp_ctl.h"
 
+#define GENERIC_AUDIO_UUID	"00001203-0000-1000-8000-00805f9b34fb"
+#define HSP_HS_UUID		"00001108-0000-1000-8000-00805f9b34fb"
+#define HSP_AG_UUID		"00001112-0000-1000-8000-00805f9b34fb"
+#define HFP_HS_UUID		"0000111e-0000-1000-8000-00805f9b34fb"
+#define HFP_AG_UUID		"0000111f-0000-1000-8000-00805f9b34fb"
+#define ADVANCED_AUDIO_UUID	"0000110d-0000-1000-8000-00805f9b34fb"
+#define A2DP_SOURCE_UUID	"0000110a-0000-1000-8000-00805f9b34fb"
+#define A2DP_SINK_UUID		"0000110b-0000-1000-8000-00805f9b34fb"
+#define AVRCP_REMOTE_UUID	"0000110e-0000-1000-8000-00805f9b34fb"
+#define AVRCP_TARGET_UUID	"0000110c-0000-1000-8000-00805f9b34fb"
+#define SCAN_FILTER
+
 #define INFO(fmt, args...) \
 	printf("[A2DP_CTL][%s] " fmt, __func__, ##args)
 
@@ -21,17 +33,25 @@ static char PLAYER_OBJECT[128] = {0};
 #define CONTROL_INTERFACE "org.bluez.MediaControl1"
 //static char CONTROL_OBJECT[128] = {0};
 
+#define ADAPTER_INTERFACE "org.bluez.Adapter1"
+static char ADAPTER_OBJECT[128] = {0};
+
+#define DEVICE_INTERFACE "org.bluez.Device1"
+
 static GMainLoop *main_loop;
 static pthread_t thread_id;
 static GDBusConnection *conn;
 static gboolean A2dpConnected = FALSE;
 
 static int call_player_method(char *method);
+static GVariant *get_property(char *obj, char *inf, char *prop);
 static int modify_tansport_volume_property(gboolean up);
 static void *dbus_thread(void *user_data);
 static int call_objManager_method(void);
 static void subscribe_signals(void);
 static void unsubscribe_signals(void);
+static GList *dev_list;
+static char device_mode[] = "central";
 
 gint ifa_signal_handle = 0;
 gint ifr_signal_handle = 0;
@@ -198,6 +218,343 @@ static int call_player_method(char *method)
 	return ret;
 }
 
+static void connect_status(void)
+{
+
+	char dev_obj[256] = {0};
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return;
+	}
+
+	if (strncmp("/org/bluez", TRANSPORT_OBJECT, 10) != 0) {
+		INFO("\n\n****Connected Device Information******\n      No Connected Device!!\n\n");
+	} else {
+		/*copy obj_path from trasport, example: /org/bluez/hci0/dev_22_22_B0_69_CE_60/fd4
+		 only the front 37 bytes copied */
+		strncpy(dev_obj, TRANSPORT_OBJECT, 37);
+
+		INFO("\n\n****Connected Device Information******\nName   : %s\nAddress: %s\nState  : %s\n\n",
+			g_variant_get_string(get_property((char *)dev_obj, DEVICE_INTERFACE, "Name"), NULL),
+			g_variant_get_string(get_property((char *)dev_obj, DEVICE_INTERFACE, "Address"), NULL),
+			g_variant_get_string(get_property((char *)TRANSPORT_OBJECT, TRANSPORT_INTERFACE, "State"), NULL));
+	}
+
+	GList *temp = g_list_first(dev_list);
+	while (temp) {
+		if (g_variant_get_boolean(get_property((char *)temp->data, DEVICE_INTERFACE, "Paired")))
+			printf("Paired  Device : %s   %s \n",
+				g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Address"), NULL),
+				g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Name"), NULL));
+		temp = temp->next;
+	}
+}
+#if 0
+static void remove_dev(void)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return;
+	}
+
+	GList *temp = g_list_first(dev_list);
+	while (temp) {
+		INFO("len %d %s\n", g_list_length(dev_list), temp->data);
+
+		if (!g_variant_get_boolean(get_property((char *)temp->data, DEVICE_INTERFACE, "Paired"))) {
+				result = g_dbus_connection_call_sync(conn,
+						"org.bluez",
+						ADAPTER_OBJECT,
+						ADAPTER_INTERFACE,
+						"RemoveDevice",
+						g_variant_new("(o)", (char *)temp->data),
+						NULL,
+						G_DBUS_CALL_FLAGS_NONE,
+						-1,
+						NULL,
+						&error);
+
+				if (result == NULL) {
+					INFO("Error: %s\n", error->message);
+					g_error_free (error);
+				} else
+					g_variant_unref(result);
+		}
+
+		temp = temp->next;
+	}
+
+
+}
+#endif
+
+static void disconnect_dev(void)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+	char obj[256] = {0};
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return;
+	}
+
+	if (strncmp("/org/bluez", TRANSPORT_OBJECT, 10) != 0) {
+		INFO("a2dp not connected\n");
+		return;
+	}
+
+	/*copy obj_path from trasport, example: /org/bluez/hci0/dev_22_22_B0_69_CE_60/fd4
+	 only the front 37 bytes copied */
+	strncpy(obj, TRANSPORT_OBJECT, 37);
+
+	INFO("Target obj: %s\n", obj);
+
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			obj,
+			DEVICE_INTERFACE,
+			"Disconnect",
+			NULL,
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL) {
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+	} else
+		g_variant_unref(result);
+}
+
+static int connect_dev(const char* bddr)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+	int ret = 1;
+	char obj[256] = {0};
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+	sprintf(obj, "/org/bluez/hci0/dev_%s", bddr);
+
+	INFO("Target obj: %s\n", obj);
+
+	if (strncmp("/org/bluez", TRANSPORT_OBJECT, 10) == 0) {
+		INFO("There is Connected Device\n");
+
+		if (strncmp(obj, TRANSPORT_OBJECT, 37) != 0) {
+			INFO("Disconnect previous device\n");
+			disconnect_dev();
+			sleep(1);
+		}
+	}
+
+	GVariant *param;
+	/*if we are central, we should connect target's sink uuid*/
+	if (strcmp(device_mode, "central") == 0)
+		param = g_variant_new("(s)", A2DP_SINK_UUID);
+	else
+		param = g_variant_new("(s)", A2DP_SOURCE_UUID);
+
+
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			obj,
+			DEVICE_INTERFACE,
+			"ConnectProfile",
+			param,
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL) {
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+		return ret;
+	} else
+		ret = 0;
+
+
+	g_variant_unref(result);
+
+	return ret;
+}
+
+static int set_scan_filter(void)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+	int ret = 0;
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+#ifdef SCAN_FILTER
+	GVariantBuilder builder;
+	GVariant *dict;
+	GVariant *array;
+	g_variant_builder_init (&builder, G_VARIANT_TYPE ("as"));
+
+
+	/*if we are central, we should discover sink device*/
+	if (strcmp(device_mode, "central") == 0)
+		g_variant_builder_add (&builder, "s", A2DP_SINK_UUID);
+	else
+		g_variant_builder_add (&builder, "s", A2DP_SOURCE_UUID);
+
+	array = g_variant_new("as", &builder);
+	g_variant_builder_clear(&builder);
+
+	g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
+	g_variant_builder_add (&builder, "{sv}", "UUIDs", array);
+	g_variant_builder_add (&builder, "{sv}", "Transport", g_variant_new_string ("bredr"));
+	//g_variant_builder_add (&builder, "{sv}", "RSSI", g_variant_new_int16(0x7fff));
+	//g_variant_builder_add (&builder, "{sv}", "Pathloss", g_variant_new_uint16(0x7fff));
+	//g_variant_builder_add (&builder, "{sv}", "DuplicateData", g_variant_new_boolean(TRUE));
+
+	dict = g_variant_new("(a{sv})", &builder);
+
+	INFO("parameters: %s \n",g_variant_print(dict, TRUE));
+
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			ADAPTER_OBJECT,
+			ADAPTER_INTERFACE,
+			"SetDiscoveryFilter",
+			dict,
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL) {
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+		ret = 1;
+	} else
+		g_variant_unref(result);
+
+	g_variant_builder_clear(&builder);
+#else
+	INFO("skip!!\n");
+#endif
+	return ret;
+}
+
+
+static int adapter_scan(int onoff)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+	int ret = -1;
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+	INFO("%s onoff: %d\n", __func__, onoff);
+
+	if (onoff) {
+		set_scan_filter();
+		result = g_dbus_connection_call_sync(conn,
+				"org.bluez",
+				ADAPTER_OBJECT,
+				ADAPTER_INTERFACE,
+				"StartDiscovery",
+				NULL,
+				NULL,
+				G_DBUS_CALL_FLAGS_NONE,
+				G_MAXINT,
+				NULL,
+				&error);
+	} else {
+		result = g_dbus_connection_call_sync(conn,
+				"org.bluez",
+				ADAPTER_OBJECT,
+				ADAPTER_INTERFACE,
+				"StopDiscovery",
+				NULL,
+				NULL,
+				G_DBUS_CALL_FLAGS_NONE,
+				-1,
+				NULL,
+				&error);
+	}
+
+	if (result == NULL) {
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+		return ret;
+	} else
+		ret = 0;
+
+
+	g_variant_unref(result);
+
+	return ret;
+}
+
+static GVariant *get_property(char *obj, char *inf, char *prop)
+{
+
+	GVariant *result;
+	GError *error = NULL;
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return NULL;
+	}
+
+	if (strncmp("/org/bluez", obj, 10) != 0) {
+		return NULL;
+	}
+
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			obj,
+			"org.freedesktop.DBus.Properties",
+			"Get",
+			g_variant_new("(ss)", inf, prop),
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL) {
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+		return NULL;
+	}
+
+	GVariant *temp = NULL;
+	g_variant_get(result, "(v)", &temp);
+	g_variant_unref(result);
+
+	//INFO("prop = %s: %s\n", prop, g_variant_print (temp, TRUE));
+
+	return temp;
+}
+
 static int modify_tansport_volume_property(gboolean up)
 {
 
@@ -315,6 +672,10 @@ static void signal_interfaces_added(GDBusConnection *conn,
 			strncpy(PLAYER_OBJECT, object, sizeof(PLAYER_OBJECT) - 1);
 		} else if (strcmp(interface_name, CONTROL_INTERFACE) == 0) {
 			INFO("Media_Control registerd: %s\n", object);
+		} else if (strcmp(interface_name, DEVICE_INTERFACE) == 0) {
+			char *temp = malloc(strlen(object) + 1);
+			strcpy(temp, object);
+			dev_list = g_list_append(dev_list, temp);
 		}
 
 		g_free(interface_name);
@@ -352,6 +713,16 @@ static void signal_interfaces_removed(GDBusConnection *conn,
 			//memset(PLAYER_OBJECT, 0, sizeof(PLAYER_OBJECT));
 		} else if (strcmp(interface_name, CONTROL_INTERFACE) == 0) {
 			//INFO("Media_Control unregisterd\n");
+		} else if (strcmp(interface_name, DEVICE_INTERFACE) == 0) {
+			GList *temp = g_list_first(dev_list);
+			while (temp) {
+				if (strcmp((char *)temp->data, object) == 0) {
+					free((char *)temp->data);
+					dev_list = g_list_remove(dev_list, temp->data);
+					break;
+				}
+				temp = temp->next;
+			}
 		}
 
 		g_free(interface_name);
@@ -468,7 +839,17 @@ static int call_objManager_method(void)
 				memset(PLAYER_OBJECT, 0, sizeof(PLAYER_OBJECT));
 				strncpy(PLAYER_OBJECT, object, sizeof(PLAYER_OBJECT) - 1);
 				INFO("Media_Player registerd: %s\n", object);
+			} else if (strcmp(interface_name, ADAPTER_INTERFACE) == 0) {
+				memset(ADAPTER_OBJECT, 0, sizeof(ADAPTER_OBJECT));
+				strncpy(ADAPTER_OBJECT, object, strlen(object));
+				INFO("Adapter registerd: %s\n", object);
+			} else if (strcmp(interface_name, DEVICE_INTERFACE) == 0) {
+				/*cache device from last scan*/
+				char *temp = malloc(strlen(object) + 1);
+				strcpy(temp, object);
+				dev_list = g_list_append(dev_list, temp);
 			}
+
 			g_free(interface_name);
 			g_variant_iter_free(iter3);
 		}
@@ -517,6 +898,91 @@ static void *dbus_thread(void *user_data)
 }
 
 
+int main(int argc, void **argv)
+{
+	int i, ret = 0;
+	int timeout = 10;
+	char *bddr = NULL;
+	if (player_init())
+		return 1;
+
+
+	while (timeout > 0) {
+		if (strncmp("/org/bluez", ADAPTER_OBJECT, 10) == 0)
+			break;
+		sleep(1);
+		timeout--;
+	}
+
+	if (timeout == 0) {
+		INFO("adapter not found!!, exit!!");
+		return 1;
+	}
+
+	if (argc > 1) {
+
+		if (argc > 3) {
+			strcpy(device_mode, argv[3]);
+			if (strcmp(device_mode, "central") != 0)
+					strcpy(device_mode, "peripheral");
+		}
+
+		INFO("device_mode = %s\n", device_mode);
+
+		if (strcmp(argv[1], "scan") == 0) {
+			sleep(1);
+
+			//remove_dev();
+
+			adapter_scan(1);
+			INFO("scanning....\n");
+
+			timeout = 5;
+			if (argc > 2)
+				timeout = atoi(argv[2]);
+
+			INFO("scan timeout = %ds\n", timeout);
+			sleep(timeout);
+
+			adapter_scan(0);
+			GList *temp = g_list_first(dev_list);
+			while (temp) {
+				INFO("Device found: %s   %s\n",
+					g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Address"), NULL),
+					g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Name"), NULL));
+
+				temp = temp->next;
+			}
+
+		} else if (strcmp(argv[1], "scanoff") == 0) {
+			adapter_scan(0);
+		} else if (strcmp(argv[1], "connect") == 0) {
+			if (argc > 2) {
+				bddr = argv[2];
+				INFO("connec target : %s\n", bddr);
+				bddr[2] = bddr[5] = bddr[8] = bddr[11] = bddr[14] = '_';
+
+				ret = connect_dev(bddr);
+				if (!ret)
+					INFO("\n*********************\n* Device Connected! *\n*********************\n");
+
+			} else {
+				INFO("please set bddr!!");
+				ret = 1;
+			}
+		} else if (strcmp(argv[1], "disconnect") == 0) {
+			disconnect_dev();
+		} else if (strcmp(argv[1], "status") == 0) {
+			connect_status();
+		}
+	}
+
+	player_delinit();
+
+	return ret;
+
+}
+#if 0
 int main(int argc, void *argv)
 {
 	int i;
@@ -557,3 +1023,4 @@ int main(int argc, void *argv)
 	return 0;
 
 }
+#endif
