@@ -22,7 +22,7 @@ static pthread_t sco_rx_thread;
 static pthread_t sco_tx_thread;
 static int sco_enabled = 0;
 
-static char pcm_device_mic[]	= "hw:0,3";
+static char pcm_device_mic[]	= "plug:microphone";
 static char pcm_device_btpcm[]	= "hw:0,0";
 static char *pcm_device_spk		;//= "dmixer_avs_auto";
 static void get_spk_device();
@@ -168,6 +168,13 @@ static void *sco_rx_cb(void *arg)
 		return NULL;
 	}
 
+#ifdef DEBUG_STREAM
+	FILE *fp;
+	fp = fopen("/tmp/rx_cb.wav", "w+");
+	if (fp  == NULL)
+		INFO("create wav file error");
+#endif
+
 	INFO("start streaming\n");
 	/*********STREAM HANDLING BEGIN***************************/
 	buf_size = expected_frames * 1 * 2;	/*bytes = frames * ch * 16Bit/8 */
@@ -187,6 +194,11 @@ static void *sco_rx_cb(void *arg)
 			continue;
 		}
 
+#ifdef DEBUG_STREAM
+		if (fp)
+			fwrite(buf, frames * 2, 1, fp);
+#endif
+
 		frames = snd_pcm_writei(pcm_handle_playback, buf, frames);
 		/*if write failed somehow, just ignore, we don't want to wast too much time*/
 		if (frames == -EPIPE) {
@@ -201,6 +213,9 @@ static void *sco_rx_cb(void *arg)
 	snd_pcm_close(pcm_handle_capture);
 	snd_pcm_close(pcm_handle_playback);
 	free(buf);
+#ifdef DEBUG_STREAM
+	fclose(fp);
+#endif
 
 	return NULL;
 }
@@ -212,7 +227,7 @@ static void *sco_tx_cb(void *arg)
 	snd_pcm_t *pcm_handle_playback;
 	snd_pcm_hw_params_t *snd_params;
 	snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
-	const int mic_channels = 8, expected_frames = 60;
+	const int mic_channels = 2, expected_frames = 60;
 	int dir, status, buf_size, buf2_size, i, rate = 8000;
 	char *buf, *buf2;
 	snd_pcm_uframes_t frames = 120;
@@ -278,6 +293,13 @@ static void *sco_tx_cb(void *arg)
 		return NULL;
 	}
 
+#ifdef DEBUG_STREAM
+	FILE *fp;
+	fp = fopen("/tmp/tx_cb.wav", "w+");
+	if (fp  == NULL)
+		INFO("create wav file error");
+#endif
+
 	INFO("start streaming\n");
 	/*********STREAM HANDLING BEGIN***************************/
 	buf_size  = expected_frames * mic_channels * 2;	/*bytes = frames * ch * 16Bit/8 */
@@ -302,10 +324,14 @@ static void *sco_tx_cb(void *arg)
 			continue;
 		}
 
+#ifdef DEBUG_STREAM
+		if (fp)
+			fwrite(buf, frames * mic_channels * 2, 1, fp);
+#endif
+
 		/*multi channel data -> 1channel data resample*/
 		for (i = 0; i < buf2_size; i++)
 			buf2[i] = buf[i * mic_channels + i % mic_channels];
-
 
 		frames = snd_pcm_writei(pcm_handle_playback, buf2, frames);
 		/*if write failed somehow, just ignore, we don't want to wast too much time*/
@@ -322,6 +348,9 @@ static void *sco_tx_cb(void *arg)
 	snd_pcm_close(pcm_handle_playback);
 	free(buf);
 	free(buf2);
+#ifdef DEBUG_STREAM
+	fclose(fp);
+#endif
 
 	return NULL;
 }
