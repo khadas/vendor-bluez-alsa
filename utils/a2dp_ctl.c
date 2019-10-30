@@ -8,6 +8,16 @@
 #include <pthread.h>
 #include "a2dp_ctl.h"
 
+#define COD_SERVICE_INFORMATION                       (1<<23)
+#define COD_SERVICE_TELEPHONY                         (1<<22)
+#define COD_SERVICE_AUDIO                             (1<<21)
+#define COD_SERVICE_OBJECT_TRANSFER                   (1<<20)
+#define COD_SERVICE_CAPTUREING                        (1<<19)
+#define COD_SERVICE_RENDERING                         (1<<18)
+#define COD_SERVICE_NETWORKING                        (1<<17)
+#define COD_SERVICE_POSITIONING                       (1<<16)
+#define COD_SERVICE_LIMITED_DISCOVERABLE_MODE         (1<<13)
+
 #define GENERIC_AUDIO_UUID	"00001203-0000-1000-8000-00805f9b34fb"
 #define HSP_HS_UUID		"00001108-0000-1000-8000-00805f9b34fb"
 #define HSP_AG_UUID		"00001112-0000-1000-8000-00805f9b34fb"
@@ -23,6 +33,13 @@
 #define INFO(fmt, args...) \
 	printf("[A2DP_CTL][%s] " fmt, __func__, ##args)
 
+#define A2DP_CTL_DEBUG 0
+#if A2DP_CTL_DEBUG
+#define DEBUG(fmt, args...) \
+	printf("[A2DP_CTL][DEBUG][%s] " fmt, __func__, ##args)
+#else
+#define DEBUG(fmt, args...)
+#endif
 
 #define TRANSPORT_INTERFACE "org.bluez.MediaTransport1"
 static char TRANSPORT_OBJECT[128] = {0};
@@ -94,6 +111,7 @@ void player_delinit(void)
 
 	if (NULL != main_loop)
 		g_main_loop_quit(main_loop);
+
 }
 
 int start_play(void)
@@ -163,6 +181,12 @@ void play_call_back(char *status)
 		/*works when paused*/
 
 	}
+}
+
+static void unref_variant(GVariant *v)
+{
+	if (v != NULL)
+		g_variant_unref(v);
 }
 
 static int call_player_method(char *method)
@@ -424,7 +448,7 @@ static int set_scan_filter(void)
 	g_variant_builder_clear(&builder);
 
 	g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
-	g_variant_builder_add (&builder, "{sv}", "UUIDs", array);
+	//g_variant_builder_add (&builder, "{sv}", "UUIDs", array);
 	g_variant_builder_add (&builder, "{sv}", "Transport", g_variant_new_string ("bredr"));
 	//g_variant_builder_add (&builder, "{sv}", "RSSI", g_variant_new_int16(0x7fff));
 	//g_variant_builder_add (&builder, "{sv}", "Pathloss", g_variant_new_uint16(0x7fff));
@@ -541,7 +565,7 @@ static GVariant *get_property(char *obj, char *inf, char *prop)
 			&error);
 
 	if (result == NULL) {
-		INFO("Error: %s\n", error->message);
+		DEBUG("Error: %s\n", error->message);
 		g_error_free (error);
 		return NULL;
 	}
@@ -550,7 +574,7 @@ static GVariant *get_property(char *obj, char *inf, char *prop)
 	g_variant_get(result, "(v)", &temp);
 	g_variant_unref(result);
 
-	//INFO("prop = %s: %s\n", prop, g_variant_print (temp, TRUE));
+	DEBUG("prop = %s: %s\n", prop, g_variant_print (temp, TRUE));
 
 	return temp;
 }
@@ -593,8 +617,8 @@ static int modify_tansport_volume_property(gboolean up)
 		return ret;
 	}
 
-	//INFO("result: %s\n", g_variant_print(result, TRUE));
-	//INFO("result type : %s\n", g_variant_get_type_string(result));
+	DEBUG("result: %s\n", g_variant_print(result, TRUE));
+	DEBUG("result type : %s\n", g_variant_get_type_string(result));
 	g_variant_get(result, "(v)", &child);
 	g_variant_get(child, "q", &value);
 
@@ -946,14 +970,63 @@ int main(int argc, void **argv)
 
 			adapter_scan(0);
 			GList *temp = g_list_first(dev_list);
+
+			GVariant *g1, *g2, *g3, *g4;
+			const gchar *addr, *name;
+			gchar *uuids = NULL;
+			guint class = 0;
+			gsize uuid_len = 0;
+			guint device_type = 0;
 			while (temp) {
-				INFO("Device found: %s   %s\n",
-					g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Address"), NULL),
-					g_variant_get_string(get_property((char *)temp->data, DEVICE_INTERFACE, "Name"), NULL));
+				g1 = get_property((char *)temp->data, DEVICE_INTERFACE, "Address");
+				if (g1 != NULL)
+					addr = g_variant_get_string(g1, NULL);
+				else
+					addr = "(null)";
+				g2 = get_property((char *)temp->data, DEVICE_INTERFACE, "Name");
+				if (g2 != NULL)
+					name = g_variant_get_string(g2, NULL);
+				else
+					name = "(null)";
+				g3 = get_property((char *)temp->data, DEVICE_INTERFACE, "Class");
+				if (g3 != NULL)
+					g_variant_get(g3, "u", &class);
+				else
+					class = 0;
+
+				g4 = get_property((char *)temp->data, DEVICE_INTERFACE, "UUIDs");
+				if (g4 != NULL) {
+					const gchar **astr = g_variant_get_strv (g4, &uuid_len);
+					uuids = malloc(uuid_len * (strlen(A2DP_SINK_UUID) + 3));
+					memset(uuids, 0,  uuid_len * (strlen(A2DP_SINK_UUID) + 3));
+					for (i = 0 ; i < uuid_len; i++)
+						sprintf(uuids, "%s %s\n", uuids, astr[i]);
+				} else {
+					uuids = "(null)";
+					uuid_len = 0;
+				}
+
+				DEBUG("Device Props: %s %s 0x%x\n%s\n", addr, name, class, uuids);
+
+				if (strcmp(device_mode, "central") == 0) {
+					if (strstr(uuids, A2DP_SINK_UUID) || ((class & COD_SERVICE_AUDIO) && (class & COD_SERVICE_RENDERING)))
+						INFO("A2DP-SINK Device found: %s %s\n", addr, name);
+				} else {
+					if (strstr(uuids, A2DP_SOURCE_UUID) || (class & COD_SERVICE_CAPTUREING))
+						INFO("A2DP-SOURCE Device found: %s %s\n", addr, name);
+				}
+
+				unref_variant(g1);
+				unref_variant(g2);
+				unref_variant(g3);
+				unref_variant(g4);
+				if (uuids != NULL) {
+					free(uuids);
+					uuids = NULL;
+				}
 
 				temp = temp->next;
 			}
-
 		} else if (strcmp(argv[1], "scanoff") == 0) {
 			adapter_scan(0);
 		} else if (strcmp(argv[1], "connect") == 0) {
