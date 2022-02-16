@@ -18,18 +18,62 @@
 #define INFO(fmt, args...) \
 	printf("[SCO_HANDLER][%s] " fmt, __func__, ##args)
 
+//#define DEBUG_STREAM 1
+
 static pthread_t sco_rx_thread;
 static pthread_t sco_tx_thread;
 static int sco_enabled = 0;
 
-static char pcm_device_mic[]	= "plug:microphone";
-static char pcm_device_btpcm[]	= "hw:0,0";
-static char *pcm_device_spk		;//= "dmixer_avs_auto";
-static void get_spk_device();
+#define ALSA_DEVICE_CONF_PATH "/etc/alsa_bt.conf"
+#define DEVICE_SIZE 128
+static char pcm_device_mic[DEVICE_SIZE]	    = "hw:0,2";
+static char pcm_device_btpcm[DEVICE_SIZE]	= "hw:0,0";
+static char pcm_device_spk[DEVICE_SIZE]		= "dmixer_auto";
+static void get_alsa_device();
 static void *sco_rx_cb(void *arg);
 static void *sco_tx_cb(void *arg);
 
+#ifdef AVOID_UAC
+// Write a number to file path.
+bool write_value(const char* path, int enable)
+{
+	int fd = open(path, O_WRONLY);
+	if (fd < 0) {
+		printf("Open %s fail: %s.\n", path, strerror(errno));
+		return false;
+	}
 
+	char cmd[4];
+	int ret = snprintf(cmd, sizeof(cmd), "%d", enable);
+	if (ret <= 0)
+		printf("Convert num %d to string fail: %s.\n", enable, strerror(errno));
+	if (write(fd, cmd, strlen(cmd)) != strlen(cmd)) {
+		printf("Write %s to %d fail: %s.\n", cmd, fd, strerror(errno));
+	}
+	close(fd);
+	return true;
+}
+
+bool uac_audio_enable(int enable) {
+
+	int KpathLen = 50;
+	const char kuac_audio_enable[] = "/sys/devices/platform/audiobridge/bridge%d/enable";
+	char uac_audio_path[KpathLen];
+	if (snprintf(uac_audio_path, KpathLen, kuac_audio_enable, 0) != strlen(uac_audio_path)) {
+		printf("Set uac_audio_path path fail.\n");
+	}
+	if (!write_value(uac_audio_path,enable))
+		printf("Set uac_audio fail\n");
+
+	if (snprintf(uac_audio_path, KpathLen, kuac_audio_enable, 1) != strlen(uac_audio_path)) {
+		printf("Set uac_audio_path path fail.\n");
+	}
+	if (!write_value(uac_audio_path,enable))
+		printf("Set uac_audio fail\n");
+
+	return true;
+}
+#endif
 int set_sco_enable(int enable)
 {
 	INFO("%s sco stream\n", enable == 0 ? "Disable" : "Enable");
@@ -40,7 +84,11 @@ int set_sco_enable(int enable)
 
 	sco_enabled = enable;
 	if (enable) {
-		get_spk_device();
+		get_alsa_device();
+#ifdef AVOID_UAC
+		INFO("disabling uac\n");
+		uac_audio_enable(0);
+#endif
 		if (pthread_create(&sco_rx_thread, NULL, sco_rx_cb, NULL)) {
 			INFO("rx thread create failed: %s\n", strerror(errno));
 			sco_enabled = 0;
@@ -70,29 +118,50 @@ int set_sco_enable(int enable)
 
 }
 
-#define APP_ALSA_DEVICE_CONF_PATH "/etc/alsa_bsa.conf"
-#define DEFAULT_SPK_DEVICE "dmixer_avs_auto"
-static void get_spk_device()
+static void get_alsa_device()
 {
-	FILE *fp;
-	struct stat st;
-	static char tmp[100];
-	int i = 0;
+	FILE *stream;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	int i;
 
-	fp = fopen(APP_ALSA_DEVICE_CONF_PATH, "r");
-	if (fp  == NULL) {
-		INFO("open ALSA DEVICE CONF error, use default");
-		strncpy(tmp, DEFAULT_SPK_DEVICE, sizeof(DEFAULT_SPK_DEVICE));
-		pcm_device_spk = tmp;
+	/* conf format:
+		spk=dimxer_avs_auto
+		mic=hw:0,2
+		pcm=hw:0,0
+	*/
+
+	stream = fopen(ALSA_DEVICE_CONF_PATH, "r");
+	if (stream == NULL) {
+		INFO("open ALSA DEVICE CONF error, use default\n");
+		char temp[64] = "spk=dimxer_avs_auto\nmic=hw:0,2\npcm=hw:0,0\n";
+		INFO("If soundcard devcie changed, set them at %s like:\n%s", ALSA_DEVICE_CONF_PATH, temp);
 		return;
 	}
 
-	fgets(tmp, sizeof(tmp), fp);
-	while (tmp[i++] != '=');
-	pcm_device_spk = strdup(tmp + i);
-	*(pcm_device_spk + strlen(pcm_device_spk) - 1) = '\0';
-	INFO("spk device = %s\n", pcm_device_spk);
-	fclose(fp);
+	while ((read = getline(&line, &len, stream)) != -1) {
+		INFO("Retrieved line of length %zu :\n", read);
+		INFO("%s\n", line);
+		/* remove the newline char */
+		line[read - 1] = 0;
+		if (strstr(line, "spk")) {
+			memset(pcm_device_spk, 0, DEVICE_SIZE);
+			strncpy(pcm_device_spk, line + 4, DEVICE_SIZE - 1);
+			for (i = 0; i < 48; i++)
+				printf("%x ", pcm_device_spk[i]);
+			printf("\n");
+		} else if (strstr(line, "mic")) {
+			memset(pcm_device_mic, 0, DEVICE_SIZE);
+			strncpy(pcm_device_mic, line + 4, DEVICE_SIZE - 1);
+		} else if (strstr(line, "pcm")) {
+			memset(pcm_device_btpcm, 0, DEVICE_SIZE) ;
+			strncpy(pcm_device_btpcm, line + 4, DEVICE_SIZE - 1);
+		}
+	}
+
+	free(line);
+	fclose(stream);
 
 }
 
@@ -150,7 +219,7 @@ static void *sco_rx_cb(void *arg)
 						  SND_PCM_STREAM_PLAYBACK,	/*speaker as output device*/
 						  1);						/*NOBLOCK MODE*/
 	if (status < 0) {
-		INFO("bt pcm open fail:%s\n", strerror(errno));
+		INFO("speaker open fail:%s\n", strerror(errno));
 		return NULL;
 	}
 
@@ -216,7 +285,10 @@ static void *sco_rx_cb(void *arg)
 #ifdef DEBUG_STREAM
 	fclose(fp);
 #endif
-
+#ifdef AVOID_UAC
+	INFO("disbling uac\n");
+	uac_audio_enable(1);
+#endif
 	return NULL;
 }
 
@@ -227,9 +299,9 @@ static void *sco_tx_cb(void *arg)
 	snd_pcm_t *pcm_handle_playback;
 	snd_pcm_hw_params_t *snd_params;
 	snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
-	const int mic_channels = 2, expected_frames = 60;
-	int dir, status, buf_size, buf2_size, i, rate = 8000;
-	char *buf, *buf2;
+	const int mic_channels = 1, expected_frames = 60;
+	int dir, status, buf_size, i, rate = 8000;
+	char *buf;
 	snd_pcm_uframes_t frames = 120;
 
 	INFO("setting mic\n");
@@ -250,7 +322,7 @@ static void *sco_tx_cb(void *arg)
 								8000,			/*8k sample rete*/
 								0,				/*allow alsa resample*/
 								100000);		/*max latence = 100ms*/
-#endif
+#else
 	snd_pcm_hw_params_alloca(&snd_params);
 	snd_pcm_hw_params_any(pcm_handle_capture, snd_params);
 	snd_pcm_hw_params_set_access(pcm_handle_capture, snd_params,
@@ -262,6 +334,7 @@ static void *sco_tx_cb(void *arg)
 
 
 	status = snd_pcm_hw_params(pcm_handle_capture, snd_params);
+#endif
 
 	if (status < 0) {
 		INFO("mic set params fail:%s\n", strerror(errno));
@@ -303,14 +376,11 @@ static void *sco_tx_cb(void *arg)
 	INFO("start streaming\n");
 	/*********STREAM HANDLING BEGIN***************************/
 	buf_size  = expected_frames * mic_channels * 2;	/*bytes = frames * ch * 16Bit/8 */
-	buf2_size = expected_frames * 1 * 2;			/*bytes = frames * ch * 16Bit/8 */
 	buf  = malloc(buf_size);
-	buf2 = malloc(buf2_size);
 
 	while (sco_enabled) {
 
 		memset(buf, 0, buf_size);
-		memset(buf2, 0, buf2_size);
 
 		frames = snd_pcm_readi(pcm_handle_capture, buf, expected_frames);
 		if (frames == -EPIPE) {
@@ -326,14 +396,10 @@ static void *sco_tx_cb(void *arg)
 
 #ifdef DEBUG_STREAM
 		if (fp)
-			fwrite(buf, frames * mic_channels * 2, 1, fp);
+			fwrite(buf, frames * 2, 1, fp);
 #endif
 
-		/*multi channel data -> 1channel data resample*/
-		for (i = 0; i < buf2_size; i++)
-			buf2[i] = buf[i * mic_channels + i % mic_channels];
-
-		frames = snd_pcm_writei(pcm_handle_playback, buf2, frames);
+		frames = snd_pcm_writei(pcm_handle_playback, buf, frames);
 		/*if write failed somehow, just ignore, we don't want to wast too much time*/
 		if (frames == -EPIPE) {
 			INFO("bt pcm write underrun\n");
@@ -347,11 +413,13 @@ static void *sco_tx_cb(void *arg)
 	snd_pcm_close(pcm_handle_capture);
 	snd_pcm_close(pcm_handle_playback);
 	free(buf);
-	free(buf2);
 #ifdef DEBUG_STREAM
 	fclose(fp);
 #endif
-
+#ifdef AVOID_UAC
+	INFO("disbling uac\n");
+	uac_audio_enable(1);
+#endif
 	return NULL;
 }
 
