@@ -82,7 +82,7 @@ static void get_spk_device()
 	fp = fopen(APP_ALSA_DEVICE_CONF_PATH, "r");
 	if (fp  == NULL) {
 		INFO("open ALSA DEVICE CONF error, use default");
-		strncpy(tmp, DEFAULT_SPK_DEVICE, strlen(DEFAULT_SPK_DEVICE));
+		strncpy(tmp, DEFAULT_SPK_DEVICE, sizeof(DEFAULT_SPK_DEVICE));
 		pcm_device_spk = tmp;
 		return;
 	}

@@ -179,6 +179,7 @@ init:
 		}
 		if (byte == 0) {
 			INFO("server off line\n");
+			teardown_socket_client(hfp_ctl_sk);
 			sleep(3);
 			goto init;
 		}

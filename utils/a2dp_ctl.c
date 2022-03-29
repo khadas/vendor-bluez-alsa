@@ -68,7 +68,7 @@ static int call_objManager_method(void);
 static void subscribe_signals(void);
 static void unsubscribe_signals(void);
 static GList *dev_list;
-static char device_mode[] = "central";
+static char device_mode[11] = "central"; //size of 11 bytes for "peripheral"
 
 gint ifa_signal_handle = 0;
 gint ifr_signal_handle = 0;
@@ -369,6 +369,11 @@ static int connect_dev(const char* bddr)
 
 	if (NULL == conn) {
 		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+	if (strlen(bddr) != strlen("xx:xx:xx:xx:xx:xx")) {
+		INFO("Bad bddr\n");
 		return ret;
 	}
 
@@ -741,8 +746,8 @@ static void signal_interfaces_removed(GDBusConnection *conn,
 			GList *temp = g_list_first(dev_list);
 			while (temp) {
 				if (strcmp((char *)temp->data, object) == 0) {
-					free((char *)temp->data);
 					dev_list = g_list_remove(dev_list, temp->data);
+					free((char *)temp->data);
 					break;
 				}
 				temp = temp->next;
@@ -857,7 +862,7 @@ static int call_objManager_method(void)
 				//get object path
 			} else if (strcmp(interface_name, TRANSPORT_INTERFACE) == 0) {
 				memset(TRANSPORT_OBJECT, 0, sizeof(TRANSPORT_OBJECT));
-				strncpy(TRANSPORT_OBJECT, object, sizeof(TRANSPORT_OBJECT) -1);
+				strncpy(TRANSPORT_OBJECT, object, sizeof(TRANSPORT_OBJECT) - 1);
 				INFO("Media_Transport registerd: %s\n", object);
 			} else if (strcmp(interface_name, PLAYER_INTERFACE) == 0) {
 				memset(PLAYER_OBJECT, 0, sizeof(PLAYER_OBJECT));
@@ -865,7 +870,7 @@ static int call_objManager_method(void)
 				INFO("Media_Player registerd: %s\n", object);
 			} else if (strcmp(interface_name, ADAPTER_INTERFACE) == 0) {
 				memset(ADAPTER_OBJECT, 0, sizeof(ADAPTER_OBJECT));
-				strncpy(ADAPTER_OBJECT, object, strlen(object));
+				strncpy(ADAPTER_OBJECT, object, sizeof(ADAPTER_OBJECT) - 1);
 				INFO("Adapter registerd: %s\n", object);
 			} else if (strcmp(interface_name, DEVICE_INTERFACE) == 0) {
 				/*cache device from last scan*/
@@ -945,11 +950,9 @@ int main(int argc, void **argv)
 
 	if (argc > 1) {
 
-		if (argc > 3) {
-			strcpy(device_mode, argv[3]);
-			if (strcmp(device_mode, "central") != 0)
-					strcpy(device_mode, "peripheral");
-		}
+		if (argc > 3)
+			if (strstr(argv[3], "peripheral"))
+				strcpy(device_mode, "peripheral");
 
 		INFO("device_mode = %s\n", device_mode);
 
@@ -965,6 +968,8 @@ int main(int argc, void **argv)
 			if (argc > 2)
 				timeout = atoi(argv[2]);
 
+			timeout = (timeout > 0   ? timeout : 1);
+			timeout = (timeout < 180 ? timeout : 180);
 			INFO("scan timeout = %ds\n", timeout);
 			sleep(timeout);
 
@@ -998,32 +1003,36 @@ int main(int argc, void **argv)
 				if (g4 != NULL) {
 					const gchar **astr = g_variant_get_strv (g4, &uuid_len);
 					uuids = malloc(uuid_len * (strlen(A2DP_SINK_UUID) + 3));
+					if (!uuids) {
+						INFO("fail to alloc uuids\n");
+						ret = -1;
+						goto error;
+					}
+
 					memset(uuids, 0,  uuid_len * (strlen(A2DP_SINK_UUID) + 3));
-					for (i = 0 ; i < uuid_len; i++)
-						sprintf(uuids, "%s %s\n", uuids, astr[i]);
-				} else {
-					uuids = "(null)";
-					uuid_len = 0;
+					for (i = 0 ; i < uuid_len; i++) {
+						strcat(uuids, astr[i]);
+						strcat(uuids, " ");
+					}
 				}
 
-				DEBUG("Device Props: %s %s 0x%x\n%s\n", addr, name, class, uuids);
+				DEBUG("Device Props: %s %s 0x%x\n%s\n", addr, name, class, (uuids == NULL ? "(null)" : uuids));
 
-				if (strcmp(device_mode, "central") == 0) {
-					if (strstr(uuids, A2DP_SINK_UUID) || ((class & COD_SERVICE_AUDIO) && (class & COD_SERVICE_RENDERING)))
-						INFO("A2DP-SINK Device found: %s %s\n", addr, name);
-				} else {
-					if (strstr(uuids, A2DP_SOURCE_UUID) || (class & COD_SERVICE_CAPTUREING))
-						INFO("A2DP-SOURCE Device found: %s %s\n", addr, name);
+				if (uuids != NULL) {
+					if (strcmp(device_mode, "central") == 0) {
+						if (strstr(uuids, A2DP_SINK_UUID) || ((class & COD_SERVICE_AUDIO) && (class & COD_SERVICE_RENDERING)))
+							INFO("A2DP-SINK Device found: %s %s\n", addr, name);
+					} else {
+						if (strstr(uuids, A2DP_SOURCE_UUID) || (class & COD_SERVICE_CAPTUREING))
+							INFO("A2DP-SOURCE Device found: %s %s\n", addr, name);
+					}
+					free(uuids);
+					uuids = NULL;
 				}
-
 				unref_variant(g1);
 				unref_variant(g2);
 				unref_variant(g3);
 				unref_variant(g4);
-				if (uuids != NULL) {
-					free(uuids);
-					uuids = NULL;
-				}
 
 				temp = temp->next;
 			}
@@ -1049,7 +1058,7 @@ int main(int argc, void **argv)
 			connect_status();
 		}
 	}
-
+error:
 	player_delinit();
 
 	return ret;

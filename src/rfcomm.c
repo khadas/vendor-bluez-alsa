@@ -614,7 +614,11 @@ static void *hfp_ctl_client_handler(void *arg)
 	/*once hcd data copied, increase the sem*/
 	sem_post(&sem);
 
-	send(fd, hello, 2, 0);
+	bytes = send(fd, hello, 2, 0);
+	if (bytes <= 0) {
+		perror("send hello faield");
+		goto error;
+	}
 
 	while (1) {
 		memset(msg, 0, sizeof(msg));
@@ -631,6 +635,7 @@ static void *hfp_ctl_client_handler(void *arg)
 		rfcomm_write_at(t->bt_fd, AT_TYPE_CMD, msg, NULL);
 	}
 
+error:
 	//release resource and exit thread
 	close(fd);
 	remove_one_client(hfp_ctl_sk, fd);

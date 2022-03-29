@@ -15,7 +15,7 @@ tAPP_SOCKET * setup_socket_server(const char *path)
 	if (!app_socket)
 		return NULL;
 
-	strcpy(app_socket->sock_path, path);
+	strncpy(app_socket->sock_path, path, sizeof(app_socket->sock_path) - 1);
 
 	unlink(path);
 	if ((app_socket->server_sockfd = socket (AF_UNIX, SOCK_STREAM, 0)) < 0) {
@@ -71,7 +71,8 @@ void send_all_client(tAPP_SOCKET *app_socket, char *msg, int len)
 	for (i = 0 ; i < CLIENT_FD_MAX; i++) {
 		if (app_socket->client_sockfd[i]) {
 			debug("%s client fd%d", __func__, app_socket->client_sockfd[i]);
-			send(app_socket->client_sockfd[i], msg, len, 0);
+			if (send(app_socket->client_sockfd[i], msg, len, 0) <= 0)
+				error("send msg to sockd %d failed", app_socket->client_sockfd[i]);
 		}
 	}
 }
@@ -132,7 +133,7 @@ int setup_socket_client(char *socket_path)
 	}
 
 	address.sun_family = AF_UNIX;
-	strncpy (address.sun_path, socket_path, sizeof(address.sun_path));
+	strncpy (address.sun_path, socket_path, sizeof(address.sun_path) - 1);
 	len = sizeof (address);
 
 	if (connect (sockfd, (struct sockaddr *)&address, len) == -1) {
