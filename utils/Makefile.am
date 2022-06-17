@@ -34,10 +34,13 @@ hcitop_LDADD = \
 endif
 
 bin_PROGRAMS += a2dp_ctl
-a2dp_ctl_SOURCES = a2dp_ctl.c
+a2dp_ctl_SOURCES = a2dp_ctl.c \
+	lib_a2dp_ctl.c
 a2dp_ctl_CFLAGS = \
+	@ALSA_CFLAGS@ \
 	@GIO2_CFLAGS@
 a2dp_ctl_LDADD = \
+	@ALSA_LIBS@ \
 	@GIO2_LIBS@
 
 bin_PROGRAMS += hfp_ctl
@@ -49,4 +52,19 @@ hfp_ctl_CFLAGS = -lpthread \
 	-I$(top_srcdir)/src \
 	@ALSA_CFLAGS@
 hfp_ctl_LDADD = \
+	@ALSA_LIBS@
+
+lib_LTLIBRARIES = liba2dp_ctl.la
+
+liba2dp_ctl_la_SOURCES = \
+	lib_a2dp_ctl.c
+
+AM_CFLAGS = \
+	@ALSA_CFLAGS@ \
+	@BLUEZ_CFLAGS@ \
+	@GLIB2_CFLAGS@
+
+AM_LDFLAGS = -module -avoid-version
+
+liba2dp_ctl_la_LIBADD = \
 	@ALSA_LIBS@
