@@ -56,16 +56,16 @@ bool write_value(const char* path, int enable)
 
 bool uac_audio_enable(int enable) {
 
-	int KpathLen = 50;
-	const char kuac_audio_enable[] = "/sys/devices/platform/audiobridge/bridge%d/enable";
-	char uac_audio_path[KpathLen];
-	if (snprintf(uac_audio_path, KpathLen, kuac_audio_enable, 0) != strlen(uac_audio_path)) {
+	int path_len = 60;
+	const char uac_audio_enable[] = "/sys/devices/platform/audiobridge/bridge%d/bridge_isolated";
+	char uac_audio_path[path_len];
+	if (snprintf(uac_audio_path, path_len, uac_audio_enable, 0) != strlen(uac_audio_path)) {
 		printf("Set uac_audio_path path fail.\n");
 	}
 	if (!write_value(uac_audio_path,enable))
 		printf("Set uac_audio fail\n");
 
-	if (snprintf(uac_audio_path, KpathLen, kuac_audio_enable, 1) != strlen(uac_audio_path)) {
+	if (snprintf(uac_audio_path, path_len, uac_audio_enable, 1) != strlen(uac_audio_path)) {
 		printf("Set uac_audio_path path fail.\n");
 	}
 	if (!write_value(uac_audio_path,enable))
@@ -86,8 +86,8 @@ int set_sco_enable(int enable)
 	if (enable) {
 		get_alsa_device();
 #ifdef AVOID_UAC
-		INFO("disabling uac\n");
-		uac_audio_enable(0);
+		INFO("enable uac virtual sound card\n");
+		uac_audio_enable(1);
 #endif
 		if (pthread_create(&sco_rx_thread, NULL, sco_rx_cb, NULL)) {
 			INFO("rx thread create failed: %s\n", strerror(errno));
@@ -286,8 +286,8 @@ static void *sco_rx_cb(void *arg)
 	fclose(fp);
 #endif
 #ifdef AVOID_UAC
-	INFO("disbling uac\n");
-	uac_audio_enable(1);
+	INFO("disable uac virtual sound card\n");
+	uac_audio_enable(0);
 #endif
 	return NULL;
 }
@@ -417,8 +417,8 @@ static void *sco_tx_cb(void *arg)
 	fclose(fp);
 #endif
 #ifdef AVOID_UAC
-	INFO("disbling uac\n");
-	uac_audio_enable(1);
+	INFO("disable uac virtual sound card\n");
+	uac_audio_enable(0);
 #endif
 	return NULL;
 }
