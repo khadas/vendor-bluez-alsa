@@ -189,6 +189,7 @@ int main(int argc, char **argv) {
 			} map[] = {
 				{ "a2dp-source", &config.enable.a2dp_source },
 				{ "a2dp-sink", &config.enable.a2dp_sink },
+				{ "a2dp-sink-aac", &config.enable.a2dp_sink_aac },
 				{ "hsp-hs", &config.enable.hsp_hs },
 				{ "hsp-ag", &config.enable.hsp_ag },
 				{ "hfp-hf", &config.enable.hfp_hf },

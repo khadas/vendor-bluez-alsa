@@ -45,6 +45,7 @@ struct ba_config {
 	struct {
 		bool a2dp_source;
 		bool a2dp_sink;
+		bool a2dp_sink_aac;
 		bool hsp_hs;
 		bool hsp_ag;
 		bool hfp_hf;
