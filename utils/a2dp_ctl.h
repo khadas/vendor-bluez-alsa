@@ -26,7 +26,9 @@
 #define _CT_H_
 
 
-int a2dp_ctl_init(void);
+typedef void (*Connect_Callback)(gboolean connected);
+typedef void (*Play_Callback)(char *status);
+int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb);
 void a2dp_ctl_delinit(void);
 int start_play(void);
 int stop_play(void);
@@ -35,8 +37,6 @@ int next(void);
 int previous(void);
 int volume_up();
 int volume_down();
-void connect_call_back(gboolean connected);
-void play_call_back(char *status);
 void set_device_mode(char *dm);
 int adapter_ready(void);
 int adapter_scan(int onoff);
@@ -44,6 +44,7 @@ int connect_dev(const char* bddr);
 void disconnect_dev(void);
 void print_connect_status(void);
 void print_scan_results(void);
+const char * get_connected_dev_addr(void);
 
 int pcm_bluealsa_open(char *bddr);
 int pcm_bluealsa_close();

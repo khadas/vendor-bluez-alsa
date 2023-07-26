@@ -32,13 +32,40 @@
 #include <pthread.h>
 #include "a2dp_ctl.h"
 
+
+void connect_call_back(gboolean connected)
+{
+    if (TRUE == connected) {
+        printf("A2dp Connected\n");
+        /*works when a2dp connected*/
+    } else {
+        printf("A2dp Disconnected\n");
+        /*works when a2dp disconnected*/
+    }
+}
+
+void play_call_back(char *status)
+{
+    /*Possible status: "playing", "stopped", "paused"*/
+    if (strcmp("playing", status) == 0) {
+        printf("Media_Player is now playing\n");
+        /*works when playing*/
+    } else if (strcmp("stopped", status) == 0) {
+        printf("Media_Player stopped\n");
+        /*works when stopped*/
+    } else if (strcmp("paused", status) == 0) {
+        printf("Media_Player paused\n");
+        /*works when paused*/
+    }
+}
+
 int main(int argc, void **argv)
 {
 	char device_mode[11] = "central"; //size of 11 bytes for "peripheral"
 	int i, ret = 0;
 	int timeout = 10;
 	char *bddr = NULL;
-	if (a2dp_ctl_init())
+	if (a2dp_ctl_init(connect_call_back, play_call_back))
 		return 1;
 
 

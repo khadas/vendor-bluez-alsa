@@ -102,10 +102,16 @@ gint ifa_signal_handle = 0;
 gint ifr_signal_handle = 0;
 gint pch_signal_handle = 0;
 
-int a2dp_ctl_init(void)
+Connect_Callback connect_cb_func = NULL;
+Play_Callback play_cb_func = NULL;
+
+int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb)
 {
 	gchar *address;
 	GError *err = NULL;
+
+	connect_cb_func = con_cb;
+	play_cb_func = play_cb;
 
 	INFO("\n");
 	address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
@@ -219,38 +225,6 @@ int volume_down()
 {
 	INFO("\n");
 	return modify_tansport_volume_property(FALSE);
-}
-
-void connect_call_back(gboolean connected)
-{
-	if (TRUE == connected) {
-		INFO("A2dp Connected\n");
-		/*works when a2dp connected*/
-
-	} else {
-		INFO("A2dp Disconnected\n");
-		/*works when a2dp disconnected*/
-	}
-
-}
-
-void play_call_back(char *status)
-{
-
-	/*Possible status: "playing", "stopped", "paused"*/
-	if (strcmp("playing", status) == 0) {
-		INFO("Media_Player is now playing\n");
-		/*works when playing*/
-
-	} else if (strcmp("stopped", status) == 0) {
-		INFO("Media_Player stopped\n");
-		/*works when stopped*/
-
-	} else if (strcmp("paused", status) == 0) {
-		INFO("Media_Player paused\n");
-		/*works when paused*/
-
-	}
 }
 
 static void unref_variant(GVariant *v)
@@ -932,7 +906,7 @@ static void signal_properties_changed(GDBusConnection *conn,
 			if (strcmp(property, "Connected") == 0) {
 				g_variant_get(value, "b", &A2dpConnected);
 				/*Possible value: TRUE, FALSE*/
-				connect_call_back(A2dpConnected);
+				connect_cb_func(A2dpConnected);
 			}
 			g_free(property);
 			g_variant_unref(value);
@@ -944,7 +918,7 @@ static void signal_properties_changed(GDBusConnection *conn,
 		while (g_variant_iter_next(properties, "{sv}", &property, &value)) {
 			if (strcmp(property, "Status") == 0) {
 				g_variant_get(value, "s", &status);
-				play_call_back(status);
+				play_cb_func(status);
 			}
 			g_free(property);
 			g_variant_unref(value);
@@ -1002,7 +976,7 @@ static int call_objManager_method(void)
 						g_variant_get(value, "b", &status);
 						//this is the beginng check, only 'TRUE' would be reported
 						if (TRUE == status) {
-							connect_call_back(TRUE);
+							connect_cb_func(TRUE);
 							A2dpConnected = TRUE;
 						}
 					}
@@ -1076,6 +1050,26 @@ static void *dbus_thread(void *user_data)
 	return NULL;
 }
 
+const char * get_connected_dev_addr(void) {
+	char dev_obj[256] = {0};
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return NULL;
+	}
+
+	if (strncmp("/org/bluez", PLAYER_OBJECT, 10) != 0) {
+		INFO("\n\n****Information::No Connected Device!!******\n\n");
+	} else {
+		INFO("PLAYER_OBJECT: %s\n", PLAYER_OBJECT);
+		/*copy obj_path from player, example: /org/bluez/hci0/dev_22_22_B0_69_CE_60/player0
+			only the front 37 bytes copied */
+		strncpy(dev_obj, PLAYER_OBJECT, 37);
+
+		return (char *)g_variant_get_string(get_property((char *)dev_obj, DEVICE_INTERFACE, "Address"), NULL);
+	}
+	return NULL;
+}
 
 #if 0
 int main(int argc, void **argv)

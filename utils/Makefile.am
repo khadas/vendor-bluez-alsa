@@ -68,3 +68,5 @@ AM_LDFLAGS = -module -avoid-version
 
 liba2dp_ctl_la_LIBADD = \
 	@ALSA_LIBS@
+
+include_HEADERS=$(top_srcdir)/utils/a2dp_ctl.h
