@@ -54,6 +54,11 @@ hfp_ctl_CFLAGS = -lpthread \
 hfp_ctl_LDADD = \
 	@ALSA_LIBS@
 
+bin_PROGRAMS += hfp_ctl_cmd
+hfp_ctl_cmd_SOURCES = hfp_ctl_cmd.c
+hfp_ctl_cmd_CFLAGS = -lpthread \
+	-I$(top_srcdir)/src
+
 lib_LTLIBRARIES = liba2dp_ctl.la
 
 liba2dp_ctl_la_SOURCES = \

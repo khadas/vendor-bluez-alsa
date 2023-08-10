@@ -7,17 +7,43 @@
 #include "shared/ctl-socket.h"
 #include "hfp_ctl.h"
 #include "sco_handler.h"
-
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <errno.h>
 
 #define INFO(fmt, args...) \
 	printf("[HFP_CTL][%s] " fmt, __func__, ##args)
 
+#define HFP_STATE_DISCONNECT        0   /* Handfree is not connected */
+#define HFP_STATE_CONNECT           1   /* Handfree is connected */
+#define HFP_STATE_CALL_IN           2   /* There is an incoming call */
+#define HFP_STATE_CALL_OUT          3   /* There is an outgoing call */
+#define HFP_STATE_CALL_OUT_RINGING  4   /* The other party has rang */
+#define HFP_STATE_CALL_IN_OUT_OVER  5   /* Incoming and outgoing calls end */
+#define HFP_STATE_CALL_START        6   /* Connected call */
+#define HFP_STATE_CALL_ENDED        7   /* Hang up */
 
+#define SPK_VOLUME_MAX              15
+#define MIC_VOLUME_MAX              15
+
+static int msqid;
 static int hfp_ctl_sk = 0;
 static unsigned int sVol = 10;
 static unsigned int mVol = 10;
 static int hfp_connected = 0;
+static int sync_state = HFP_STATE_DISCONNECT;
 static pthread_t phfp_ctl_id;
+static const char *state_str[] = {
+	HFP_STATE_DISCONNECT_STRING,
+	HFP_STATE_CONNECT_STRING,
+	HFP_STATE_CALL_IN_STRING,
+	HFP_STATE_CALL_OUT_STRING,
+	HFP_STATE_CALL_OUT_RINGING_STRING,
+	HFP_STATE_CALL_IN_OUT_OVER_STRING,
+	HFP_STATE_CALL_START_STRING,
+	HFP_STATE_CALL_ENDED_STRING
+};
+
 static void *hfp_ctl_monitor(void *arg);
 
 #define CTL_SOCKET_PATH "/etc/bluetooth/hfp_ctl_sk"
@@ -41,7 +67,6 @@ static void *hfp_ctl_monitor(void *arg);
 #define HFP_IND_CALLSETUP_OUT       2
 /* remote party being alerted in an outgoing call */
 #define HFP_IND_CALLSETUP_OUT_ALERT 3
-
 
 int hfp_ctl_init(void)
 {
@@ -96,26 +121,30 @@ int reject_call(void)
 
 int VGS_up(void)
 {
-	sVol += 1;
+	if (sVol < SPK_VOLUME_MAX)
+		sVol += 1;
 	return set_VGS(sVol);
 }
 
 int VGS_down(void)
 {
-	sVol -= 1;
+	if (sVol > 0)
+		sVol -= 1;
 	return set_VGS(sVol);
 
 }
 
 int VGM_up(void)
 {
-	mVol += 1;
+	if (mVol < SPK_VOLUME_MAX)
+		mVol += 1;
 	return set_VGM(mVol);
 }
 
 int VGM_down(void)
 {
-	mVol -= 1;
+	if (mVol > 0)
+		mVol -= 1;
 	return set_VGM(mVol);
 
 }
@@ -127,7 +156,7 @@ int set_VGS(int value)
 
 	//value range from 0 ~ 15
 	value = value < 0 ? 0 : value;
-	value = value > 15 ? 15 : value;
+	value = value > SPK_VOLUME_MAX ? SPK_VOLUME_MAX : value;
 
 	sprintf(msg, "+VGS=%d", value);
 	INFO("\n");
@@ -145,7 +174,7 @@ int set_VGM(int value)
 
 	//value range from 0 ~ 15
 	value = value < 0 ? 0 : value;
-	value = value > 15 ? 15 : value;
+	value = value > MIC_VOLUME_MAX ? MIC_VOLUME_MAX : value;
 
 	sprintf(msg, "+VGM=%d", value);
 	INFO("\n");
@@ -156,18 +185,93 @@ int set_VGM(int value)
 	return ret;
 }
 
+static void msg_handler(int event, int value)
+{
+	char cmd[64];
+	switch (event) {
+	case HFP_EVENT_CONNECTION:
+		switch (value) {
+		case HFP_IND_DEVICE_DISCONNECTED:
+			INFO("HFP disconnected!!!\n");
+			set_sco_enable(0);
+			hfp_connected = 0;
+			sync_state = HFP_STATE_DISCONNECT;
+			break;
+		case HFP_IND_DEVICE_CONNECTED:
+			INFO("HFP connected!!!\n");
+			hfp_connected = 1;
+			sync_state = HFP_STATE_CONNECT;
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case HFP_EVENT_CALL:
+		switch (value) {
+		case HFP_IND_CALL_NONE:
+			INFO("Call stopped!!!\n");
+			set_sco_enable(0);
+			sync_state = HFP_STATE_CALL_ENDED;
+			break;
+		case HFP_IND_CALL_ACTIVE :
+			INFO("Call active!!!\n");
+			set_sco_enable(1);
+			sync_state = HFP_STATE_CALL_START;
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case HFP_EVENT_CALLSETUP:
+		switch (value) {
+		case HFP_IND_CALLSETUP_NONE:
+			INFO("Callsetup stopped!!!\n");
+			if (sync_state != HFP_STATE_CALL_START) {
+				sync_state = HFP_STATE_CALL_IN_OUT_OVER;
+			}
+			break;
+		case HFP_IND_CALLSETUP_IN :
+			INFO("An incoming Callsetup!!!\n");
+			sync_state = HFP_STATE_CALL_IN;
+			break;
+		case HFP_IND_CALLSETUP_OUT :
+			INFO("An outgoing Callsetup!!!\n");
+			sync_state = HFP_STATE_CALL_OUT;
+			break;
+		case HFP_IND_CALLSETUP_OUT_ALERT :
+			INFO("Remote device being altered!!!\n");
+			sync_state = HFP_STATE_CALL_OUT_RINGING;
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case HFP_EVENT_VGS:
+		INFO("VGS EVENT!!!\n");
+		sVol = value;
+		break;
+	case HFP_EVENT_VGM:
+		INFO("VGM EVENT!!!\n");
+		mVol = value;
+		break;
+	default:
+		break;
+	}
+}
+
 static void *hfp_ctl_monitor(void *arg)
 {
 	int byte, value = -1, event =-1, i;
 	char msg[64];
-
 init:
 	hfp_ctl_sk = setup_socket_client(CTL_SOCKET_PATH);
 	if (hfp_ctl_sk < 0) {
 		sleep(3);
 		goto init;
 	}
-
 
 	INFO("recieving....\n");
 	while (1) {
@@ -184,10 +288,14 @@ init:
 			goto init;
 		}
 
-		if (byte == 2) {
-			event = msg[0];
-			value = msg[1];
-			INFO("event = %d, value = %d\n", event, value);
+		if (byte >= 2) {
+			INFO("incoming msg of %d bytes\n", byte);
+			for (i = 0; i + 1 < byte; i += 2) {
+				event = msg[i];
+				value = msg[i + 1];
+				INFO("event = %d, value = %d\n", event, value);
+				msg_handler(event, value);
+			}
 		} else {
 #if 0
 			INFO("invalid msg: %s\n", msg);
@@ -195,61 +303,6 @@ init:
 				INFO("msg %d = %d\n", i, msg[i]);
 #endif
 			continue;
-		}
-
-		switch (event) {
-			case HFP_EVENT_CONNECTION:
-				switch (value) {
-					case HFP_IND_DEVICE_DISCONNECTED:
-						INFO("HFP disconnected!!!\n");
-						set_sco_enable(0);
-						hfp_connected = 0;
-						break;
-					case HFP_IND_DEVICE_CONNECTED:
-						INFO("HFP connected!!!\n");
-						hfp_connected = 1;
-						break;
-				}
-				break;
-
-			case HFP_EVENT_CALL:
-				switch (value) {
-					case HFP_IND_CALL_NONE:
-						INFO("Call stopped!!!\n");
-						set_sco_enable(0);
-						break;
-					case HFP_IND_CALL_ACTIVE :
-						INFO("Call active!!!\n");
-						set_sco_enable(1);
-						break;
-				}
-				break;
-
-			case HFP_EVENT_CALLSETUP:
-				switch (value) {
-					case HFP_IND_CALLSETUP_NONE:
-						INFO("Callsetup stopped!!!\n");
-						break;
-					case HFP_IND_CALLSETUP_IN :
-						INFO("An incomming Callsetup!!!\n");
-						break;
-					case HFP_IND_CALLSETUP_OUT :
-						INFO("An outgoing Callsetup!!!\n");
-						break;
-					case HFP_IND_CALLSETUP_OUT_ALERT :
-						INFO("Remote device being altered!!!\n");
-						break;
-				}
-				break;
-
-			case HFP_EVENT_VGS:
-				INFO("VGS EVENT!!!\n");
-				sVol = value;
-				break;
-			case HFP_EVENT_VGM:
-				INFO("VGM EVENT!!!\n");
-				mVol = value;
-				break;
 		}
 	}
 	INFO("exit\n");
@@ -260,21 +313,35 @@ static void signal_handler(int sig)
 {
 	INFO("INT/TERM signal detected\n");
 	hfp_ctl_delinit();
+	msgctl(msqid, IPC_RMID, 0);
 	signal(sig, SIG_DFL);
 	exit(0);
 }
 
-
 int main(int argc, char **argv)
 {
+	struct msgstru msgs;
 
 	if (hfp_ctl_init())
 		return -1;
 
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
-	while (!hfp_connected)
-		sleep(1);
+
+	msqid = msgget(MSGKEY, IPC_EXCL);
+	if (msqid < 0)
+	{
+		if (errno == ENOENT) {
+			msqid = msgget(MSGKEY, IPC_CREAT | 0666);
+			if (msqid < 0) {
+				INFO("msgget() failed to create a new message queue");
+				exit(-1);
+			}
+		} else {
+			INFO("msgget() failed to get an existing message queue");
+			exit(-1);
+		}
+	}
 
 #if 0
 	answer_call();
@@ -285,7 +352,28 @@ int main(int argc, char **argv)
 	sleep(5);
 	reject_call();
 #endif
-	while (1)
-		sleep(1);
-
+	while (1) {
+		int ret = msgrcv(msqid, &msgs, sizeof(msgs.msgtext), MSGTYPE_TO_HOST, 0);
+		if (ret > 0)
+		{
+			if (!strcmp(msgs.msgtext, "answer_call"))
+				answer_call();
+			else if (!strcmp(msgs.msgtext, "reject_call"))
+				reject_call();
+			else if (!strcmp(msgs.msgtext, "vol_spk_up"))
+				VGS_up();
+			else if (!strcmp(msgs.msgtext, "vol_spk_down"))
+				VGS_down();
+			else if (!strcmp(msgs.msgtext, "vol_mic_up"))
+				VGM_up();
+			else if (!strcmp(msgs.msgtext, "vol_mic_down"))
+				VGM_down();
+			else if (!strcmp(msgs.msgtext, "get_state")) {
+				msgs.msgtype = MSGTYPE_FROM_HOST;
+				memset(msgs.msgtext, 0, sizeof(msgs.msgtext));
+				sprintf(msgs.msgtext, "hfp_state=%s", state_str[sync_state]);
+				msgsnd(msqid, &msgs, sizeof(msgs.msgtext), IPC_NOWAIT);
+			}
+		}
+	}
 }
