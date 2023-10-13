@@ -59,13 +59,18 @@ void play_call_back(char *status)
     }
 }
 
+void volume_call_back(guint16 volume)
+{
+    printf("volume is %d\n", volume);
+}
+
 int main(int argc, void **argv)
 {
 	char device_mode[11] = "central"; //size of 11 bytes for "peripheral"
 	int i, ret = 0;
 	int timeout = 10;
 	char *bddr = NULL;
-	if (a2dp_ctl_init(connect_call_back, play_call_back))
+	if (a2dp_ctl_init(connect_call_back, play_call_back, volume_call_back))
 		return 1;
 
 

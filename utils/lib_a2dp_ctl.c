@@ -104,14 +104,16 @@ gint pch_signal_handle = 0;
 
 Connect_Callback connect_cb_func = NULL;
 Play_Callback play_cb_func = NULL;
+Volume_Callback volume_cb_func = NULL;
 
-int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb)
+int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb, Volume_Callback volume_cb)
 {
 	gchar *address;
 	GError *err = NULL;
 
 	connect_cb_func = con_cb;
 	play_cb_func = play_cb;
+	volume_cb_func = volume_cb;
 
 	INFO("\n");
 	address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
@@ -168,12 +170,13 @@ int pcm_bluealsa_open(char *bddr)
 	if (ret < 0) {
 		INFO("snd_pcm_set_params fail:%s\n", strerror(errno));
 	}
-
+	return ret;
 }
 
 int pcm_bluealsa_close()
 {
 	snd_pcm_close(pcm_handle_playback);
+	return 0;
 }
 
 int pcm_bluealsa_write(void *buf, size_t bytes)
@@ -188,6 +191,7 @@ int pcm_bluealsa_write(void *buf, size_t bytes)
 	} else if (ret == -EBADFD) {
 		INFO("speaker write  EBADFD\n");
 	}
+	return ret;
 }
 
 int start_play(void)
@@ -892,6 +896,7 @@ static void signal_properties_changed(GDBusConnection *conn,
 	GVariantIter *properties;
 	GVariant *value;
 	char *property, *interface_name, *status;
+	guint16 volume;
 
 	if (strcmp(signature, "(sa{sv}as)") != 0) {
 		INFO("Invalid signature for %s: %s != %s", signal, signature, "(sa{sv}as)");
@@ -907,6 +912,17 @@ static void signal_properties_changed(GDBusConnection *conn,
 				g_variant_get(value, "b", &A2dpConnected);
 				/*Possible value: TRUE, FALSE*/
 				connect_cb_func(A2dpConnected);
+			}
+			g_free(property);
+			g_variant_unref(value);
+		}
+	}
+
+	if (strcmp(interface_name, TRANSPORT_INTERFACE) == 0) {
+		while (g_variant_iter_next(properties, "{sv}", &property, &value)) {
+			if (strcmp(property, "Volume") == 0) {
+				g_variant_get(value, "q", &volume);
+				volume_cb_func(volume);
 			}
 			g_free(property);
 			g_variant_unref(value);
@@ -1069,6 +1085,68 @@ const char * get_connected_dev_addr(void) {
 		return (char *)g_variant_get_string(get_property((char *)dev_obj, DEVICE_INTERFACE, "Address"), NULL);
 	}
 	return NULL;
+}
+
+gint16 get_connected_dev_volume(void) {
+	GVariant *result, *value;
+	GError *error = NULL;
+	GVariantIter *iter1, *iter2, *iter3;
+	char *object, *interface_name, *property;
+	guint16 volume;
+	gint16 ret = -1;
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			"/",
+			"org.freedesktop.DBus.ObjectManager",
+			"GetManagedObjects",
+			NULL,
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL)
+	{
+		INFO("Error: %s\n", error->message);
+		g_error_free (error);
+		return ret;
+	}
+
+	g_variant_get(result, "(a{oa{sa{sv}}})", &iter1);
+	while (g_variant_iter_next(iter1, "{oa{sa{sv}}}", &object, &iter2)) {
+		while (g_variant_iter_next(iter2, "{sa{sv}}", &interface_name, &iter3)) {
+			INFO("interface_name: %s.\n", interface_name);
+			if (strcmp(interface_name, TRANSPORT_INTERFACE) == 0) {
+				memset(TRANSPORT_OBJECT, 0, sizeof(TRANSPORT_OBJECT));
+				strncpy(TRANSPORT_OBJECT, object, sizeof(TRANSPORT_OBJECT) - 1);
+				while (g_variant_iter_next(iter3, "{sv}", &property, &value)) {
+					INFO("property = %s\n", property);
+					if (strcmp(property, "Volume") == 0) {
+						g_variant_get(value, "q", &volume);
+						INFO("volume = %d\n", volume);
+						ret = volume;
+					}
+					g_free(property);
+					g_variant_unref(value);
+				}
+			}
+			g_free(interface_name);
+			g_variant_iter_free(iter3);
+		}
+		g_free(object);
+		g_variant_iter_free(iter2);
+	}
+
+	g_variant_iter_free(iter1);
+	g_variant_unref(result);
+	return ret;
 }
 
 #if 0

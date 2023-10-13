@@ -28,7 +28,8 @@
 
 typedef void (*Connect_Callback)(gboolean connected);
 typedef void (*Play_Callback)(char *status);
-int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb);
+typedef void (*Volume_Callback)(guint16 volume);
+int a2dp_ctl_init(Connect_Callback con_cb, Play_Callback play_cb, Volume_Callback volume_cb);
 void a2dp_ctl_delinit(void);
 int start_play(void);
 int stop_play(void);
@@ -45,6 +46,7 @@ void disconnect_dev(void);
 void print_connect_status(void);
 void print_scan_results(void);
 const char * get_connected_dev_addr(void);
+gint16 get_connected_dev_volume(void);
 
 int pcm_bluealsa_open(char *bddr);
 int pcm_bluealsa_close();
