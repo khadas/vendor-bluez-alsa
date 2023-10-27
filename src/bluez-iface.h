@@ -13,7 +13,7 @@
 
 #include <gio/gio.h>
 
-const GDBusInterfaceInfo bluez_iface_endpoint;
-const GDBusInterfaceInfo bluez_iface_profile;
+extern const GDBusInterfaceInfo bluez_iface_endpoint;
+extern const GDBusInterfaceInfo bluez_iface_profile;
 
 #endif
