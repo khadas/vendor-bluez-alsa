@@ -228,16 +228,20 @@ static void msg_handler(int event, int value)
 		switch (value) {
 		case HFP_IND_CALLSETUP_NONE:
 			INFO("Callsetup stopped!!!\n");
+			/* stop stream only when call is not actived*/
 			if (sync_state != HFP_STATE_CALL_START) {
 				sync_state = HFP_STATE_CALL_IN_OUT_OVER;
+				set_sco_enable(0);
 			}
 			break;
 		case HFP_IND_CALLSETUP_IN :
 			INFO("An incoming Callsetup!!!\n");
+			set_sco_enable(1);
 			sync_state = HFP_STATE_CALL_IN;
 			break;
 		case HFP_IND_CALLSETUP_OUT :
 			INFO("An outgoing Callsetup!!!\n");
+			set_sco_enable(1);
 			sync_state = HFP_STATE_CALL_OUT;
 			break;
 		case HFP_IND_CALLSETUP_OUT_ALERT :
