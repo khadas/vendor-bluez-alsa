@@ -38,6 +38,7 @@ int next(void);
 int previous(void);
 int volume_up();
 int volume_down();
+int volume_set(int volume);
 void set_device_mode(char *dm);
 int adapter_ready(void);
 int adapter_scan(int onoff);
@@ -50,5 +51,5 @@ gint16 get_connected_dev_volume(void);
 
 int pcm_bluealsa_open(char *bddr);
 int pcm_bluealsa_close();
-int pcm_bluealsa_write(void *buf, size_t bytes) ;
+int pcm_bluealsa_write(void *buf, size_t bytes);
 #endif

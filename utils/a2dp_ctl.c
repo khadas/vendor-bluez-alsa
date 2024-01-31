@@ -33,19 +33,85 @@
 #include "a2dp_ctl.h"
 
 
+unsigned int flag_volume_val = 0;
+
+#define SAVE_VOLUME "/data/bt_a2dp_volume"
+
+int aml_getprop_read(guint16 *volume)
+{
+    FILE *file;
+
+    // open the file, "r means read-only mode.
+    file = fopen(SAVE_VOLUME, "r");
+    if (file == NULL) {
+        printf("open the file failed.\n");
+        return -1;
+    }
+
+    // use fscanf to read volume from the file
+    fscanf(file, "%d", volume);
+
+    // close the file
+    fclose(file);
+
+    // print the info
+    //printf("read the volume：%d\n", *volume);
+
+    return 0;
+}
+
+int aml_setprop_write(guint16 str)
+{
+	FILE *file;
+	unsigned int number = str;
+
+	// open the file, "w" means write mode.
+	file = fopen(SAVE_VOLUME, "w");
+	if (file == NULL) {
+		printf("open the file failed.\n");
+		return -1;
+	}
+
+	// use fprintf to write volume to the file
+	fprintf(file, "%d", number);
+
+	// close the file
+	fclose(file);
+
+	//printf("volume = %d, which is already written to the file.\n",number);
+
+	return 0;
+}
+
 void connect_call_back(gboolean connected)
 {
     if (TRUE == connected) {
         printf("A2dp Connected\n");
         /*works when a2dp connected*/
+        flag_volume_val = 1;
     } else {
         printf("A2dp Disconnected\n");
         /*works when a2dp disconnected*/
+        flag_volume_val = 0;
     }
 }
 
 void play_call_back(char *status)
 {
+    int ret = -1;
+    unsigned int volume_val = 0;
+    if (flag_volume_val) {
+        flag_volume_val = 0;
+        ret = aml_getprop_read(&volume_val);
+        if (ret < 0) {
+            volume_val = 0;
+            printf("volume file is not found, use default volume 0 \n");
+            aml_setprop_write(volume_val);
+        }
+        printf("aml_getprop_read = %d \n",volume_val);
+        volume_set(volume_val);
+    }
+
     /*Possible status: "playing", "stopped", "paused"*/
     if (strcmp("playing", status) == 0) {
         printf("Media_Player is now playing\n");
@@ -61,7 +127,19 @@ void play_call_back(char *status)
 
 void volume_call_back(guint16 volume)
 {
+    unsigned int volume_val = 0;
+    int ret = -1;
+
     printf("volume is %d\n", volume);
+
+    ret = aml_getprop_read(&volume_val);
+    if (ret == 0) {
+        if (volume_val != volume) {
+            aml_setprop_write(volume);
+        }
+    } else {
+        aml_setprop_write(volume);
+    }
 }
 
 int main(int argc, void **argv)
@@ -133,6 +211,11 @@ int main(int argc, void **argv)
 			disconnect_dev();
 		} else if (strcmp(argv[1], "status") == 0) {
 			print_connect_status();
+		} else if (strcmp(argv[1], "volume_test") == 0) {
+			while (1) {
+				sleep(5);
+				printf("test-----\n");
+			}
 		}
 	}
 	a2dp_ctl_delinit();

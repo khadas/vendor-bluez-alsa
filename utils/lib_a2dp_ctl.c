@@ -88,6 +88,7 @@ static gboolean A2dpConnected = FALSE;
 static int call_player_method(char *method);
 static GVariant *get_property(char *obj, char *inf, char *prop);
 static int modify_tansport_volume_property(gboolean up);
+static int modify_tansport_set_volume_property(int volume);
 static void *dbus_thread(void *user_data);
 static int call_objManager_method(void);
 static void subscribe_signals(void);
@@ -229,6 +230,12 @@ int volume_down()
 {
 	INFO("\n");
 	return modify_tansport_volume_property(FALSE);
+}
+
+int volume_set(int volume)
+{
+	INFO("\n");
+	return modify_tansport_set_volume_property(volume);
 }
 
 static void unref_variant(GVariant *v)
@@ -702,6 +709,64 @@ static GVariant *get_property(char *obj, char *inf, char *prop)
 	DEBUG("prop = %s: %s\n", prop, g_variant_print (temp, TRUE));
 
 	return temp;
+}
+
+static int modify_tansport_set_volume_property(int volume)
+{
+
+	GVariant *result = NULL, *child = NULL, *parameters = NULL;
+	int value = 0, ret = -1;
+	GError *error = NULL;
+
+	if (NULL == conn) {
+		INFO("No connection!! Please init first\n");
+		return ret;
+	}
+
+	if (FALSE == A2dpConnected) {
+		INFO("A2dp not connected yet!\n");
+		return ret;
+	}
+
+	value = volume;
+
+	//volume rang from 0~127
+	value = value > 127 ? 127 : value;
+	value = value > 0	? value : 0;
+
+	INFO("volume set: %u\n", value);
+
+	child = g_variant_new_uint16(value);
+	parameters = g_variant_new("(ssv)",
+			TRANSPORT_INTERFACE,
+			"Volume",
+			child);
+
+	/*------------------set volume-----------------------------------------------*/
+	result = g_dbus_connection_call_sync(conn,
+			"org.bluez",
+			TRANSPORT_OBJECT,
+			"org.freedesktop.DBus.Properties",
+			"Set",
+			parameters,
+			NULL,
+			G_DBUS_CALL_FLAGS_NONE,
+			-1,
+			NULL,
+			&error);
+
+	if (result == NULL)
+	{
+		INFO("Error: %s\n", error->message);
+		INFO("volume set failed\n");
+		g_error_free (error);
+		return ret;
+	} else
+		ret = 0;
+
+	g_variant_unref(result);
+
+	return ret;
 }
 
 static int modify_tansport_volume_property(gboolean up)
